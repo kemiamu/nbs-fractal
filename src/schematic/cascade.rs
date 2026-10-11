@@ -70,7 +70,7 @@ impl AsLayout for CascadeLayout {
 /// The track centres, leftmost outward track to rightmost; a track's three slots
 /// sit at its centre and the cells either side.
 const TRACK: [i32; 17] = [
-    1, 4, 7, 11, 16, 22, 29, 36, 39, 42, 49, 56, 62, 67, 71, 74, 77,
+    0, 3, 6, 10, 15, 22, 32, 42, 45, 48, 58, 68, 75, 80, 84, 87, 90,
 ];
 
 /// One tick of the wall: the voices its tracks carry, three slots per track.
@@ -86,7 +86,7 @@ impl Template {
     /// Each track's declared loudness, percent; the centre is full strength and
     /// the sides fall off a touch faster the further out they sit.
     const LOUDNESS: [u8; 17] = [
-        0, 0, 5, 30, 50, 70, 90, 100, 100, 100, 90, 70, 50, 30, 5, 0, 0,
+        0, 10, 20, 30, 50, 70, 90, 100, 100, 100, 90, 70, 50, 30, 20, 10, 0,
     ];
 
     /// Fills a row with the voices to sound on its tick, placing each on the
@@ -120,9 +120,11 @@ impl Template {
     }
 
     /// The side tracks a voice falls between, or `None` when it belongs in the centre.
+    /// Each ear rounds up, so it leans to the heavier side rather than the lighter.
     fn route(volume: u8, panning: i8) -> Option<[Option<usize>; 2]> {
         let (v, p) = (i32::from(volume), i32::from(panning));
-        let (left, right) = (v * (100 - p.max(0)) / 100, v * (100 + p.min(0)) / 100);
+        let left = (v * (100 - p.max(0)) + 88) / 100;
+        let right = (v * (100 + p.min(0)) + 88) / 100;
         const FULL: i32 = 95;
         if left >= FULL && right >= FULL {
             return None;
@@ -265,32 +267,31 @@ impl Layout for Linkage {
         use WireConn::{None as Open, Side};
         match (pos.z, pos.y, pos.x) {
             // z0..=z2
-            (0..=2, 0, 39) => Some(chain_block()),
-            (0, 1, 39) => Some(button()),
-            (1..=2, 1, 39) => Some(repeater("4", Facing::South, false, false)),
+            (0..=2, 0, 45) => Some(chain_block()),
+            (0, 1, 45) => Some(button()),
+            (1..=2, 1, 45) => Some(repeater("4", Facing::South, false, false)),
             // z3
-            (3, 1, 8 | 24) => Some(repeater("1", Facing::West, false, false)),
-            (3, 1, 54 | 70) => Some(repeater("1", Facing::East, false, false)),
-            (3, 1, 1) => Some(wire_state(Open, Side, Open, Side, "0")),
-            (3, 1, 77) => Some(wire_state(Side, Open, Open, Side, "0")),
-            (3, 1, 39) => Some(wire_state(Side, Side, Side, Side, "0")),
-            // The bus taps every track but the ends and centre.
-            (3, 1, x) if TRACK[1..8].contains(&x) || TRACK[9..16].contains(&x) => {
-                Some(wire_state(Side, Side, Open, Side, "0"))
-            }
-            (3, 0, 1..=77) => Some(chain_block()),
-            (3, 1, 1..=77) => Some(wire_state(Side, Side, Open, Open, "0")),
+            (3, 1, 1 | 16 | 30) => Some(repeater("1", Facing::West, false, false)),
+            (3, 1, 60 | 74 | 89) => Some(repeater("1", Facing::East, false, false)),
+            (3, 1, 0) => Some(wire_state(Open, Side, Open, Side, "0")),
+            (3, 1, 90) => Some(wire_state(Side, Open, Open, Side, "0")),
+            (3, 1, 45) => Some(wire_state(Side, Side, Side, Side, "0")),
+            (3, 1, x) if TRACK.contains(&x) => Some(wire_state(Side, Side, Open, Side, "0")),
+            (3, 0, 0..=90) => Some(chain_block()),
+            (3, 1, 0..=90) => Some(wire_state(Side, Side, Open, Open, "0")),
             // z4
             (4, 0, x) if TRACK.contains(&x) => Some(chain_block()),
-            (4, 1, 29 | 36 | 39 | 42 | 49) => Some(repeater("4", Facing::South, false, false)),
-            (4, 1, 11 | 16 | 22 | 56 | 62 | 67) => Some(repeater("3", Facing::South, false, false)),
-            (4, 1, 1 | 4 | 7 | 71 | 74 | 77) => Some(repeater("2", Facing::South, false, false)),
+            (4, 1, 0 | 90) => Some(repeater("1", Facing::South, false, false)),
+            (4, 1, 3 | 6 | 10 | 15) => Some(repeater("2", Facing::South, false, false)),
+            (4, 1, 75 | 80 | 84 | 87) => Some(repeater("2", Facing::South, false, false)),
+            (4, 1, 22 | 68) => Some(repeater("3", Facing::South, false, false)),
+            (4, 1, 32 | 42 | 45 | 48 | 58) => Some(repeater("4", Facing::South, false, false)),
             _ => None,
         }
     }
 
     fn size(&self) -> BlockPos {
-        BlockPos::new(79, 2, 5)
+        BlockPos::new(92, 2, 5)
     }
 }
 
