@@ -60,27 +60,41 @@ impl AsLayout for CascadeLayout {
 // Templates: Template & Linkage
 //
 // Linkage is the fixed front that sets every track running together; Template is
-// one tick of the wall. Voices sit by how they are heard: loudness chooses a
-// track's ring and panning divides it between the sides.
+// one tick of the wall. Every track declares the loudness it projects, so a voice
+// is placed by how it should be heard: loudness picks the track, panning the side.
 //
 // ++++++++++++============++++++++++++============++++++++++++============
+
+// TODO: Template pending refactor. AI-generated; doesn't quite fit the design.
+
+/// The track centres, leftmost outward track to rightmost; a track's three slots
+/// sit at its centre and the cells either side.
+const TRACK: [i32; 17] = [
+    1, 4, 7, 11, 16, 22, 29, 36, 39, 42, 49, 56, 62, 67, 71, 74, 77,
+];
 
 /// One tick of the wall: the voices its tracks carry, three slots per track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Template {
-    slots: [[Option<Tone>; 3]; 13],
+    slots: [[Option<Tone>; 3]; 17],
 }
 
 impl Template {
     /// The three centre tracks, left inner to right inner.
-    const CENTRE: [usize; 3] = [5, 6, 7];
+    const CENTRE: [usize; 3] = [7, 8, 9];
 
-    /// Fills a row with the voices to sound on its tick, placing each by how it is
-    /// heard: loudness picks the track, panning divides the sides, and the loudest
-    /// voices stack in the centre.
+    /// Each track's declared loudness, percent; the centre is full strength and
+    /// the sides fall off a touch faster the further out they sit.
+    const LOUDNESS: [u8; 17] = [
+        0, 0, 5, 30, 50, 70, 90, 100, 100, 100, 90, 70, 50, 30, 5, 0, 0,
+    ];
+
+    /// Fills a row with the voices to sound on its tick, placing each on the
+    /// track nearest its loudness; panning divides the sides, and the loudest
+    /// balanced voices stack in the centre.
     fn new<I: IntoIterator<Item = Note>>(notes: I) -> Self {
         let mut template = Self {
-            slots: [[None; 3]; 13],
+            slots: [[None; 3]; 17],
         };
         // A voice the wall cannot sound never takes a slot; it would only push the
         // voices that do onto the sides and leave the centre bare.
@@ -107,18 +121,34 @@ impl Template {
 
     /// The side tracks a voice falls between, or `None` when it belongs in the centre.
     fn route(volume: u8, panning: i8) -> Option<[Option<usize>; 2]> {
-        const LOUDEST: usize = 4;
-        let (v, p) = (volume as i32, panning as i32);
-        let ring = |l: i32| ((l + 12) / 25).clamp(0, 4) as usize;
-        let (left, right) = (v * (100 - p.max(0)) / 100, v * (100 + p.min(0)) / 100);
-        if ring(left) == LOUDEST && ring(right) == LOUDEST {
+        const CENTRE: i32 = 95;
+        let (left, right) = Self::ears(volume, panning);
+        if left >= CENTRE && right >= CENTRE {
             return None;
         }
-        let ear = |loudness: i32, east: bool| {
-            let track = ring(loudness).min(LOUDEST - 1);
-            (loudness > 0).then(|| if east { 11 - track } else { 1 + track })
+        Some([Self::side(left, false), Self::side(right, true)])
+    }
+
+    /// Splits a voice's loudness between the two ears under its panning.
+    fn ears(volume: u8, panning: i8) -> (i32, i32) {
+        let (v, p) = (i32::from(volume), i32::from(panning));
+        (v * (100 - p.max(0)) / 100, v * (100 + p.min(0)) / 100)
+    }
+
+    /// The track on one side nearest a loudness; `None` when the ear is silent.
+    fn side(loudness: i32, east: bool) -> Option<usize> {
+        if loudness <= 0 {
+            return None;
+        }
+        let tracks = match east {
+            true => 10..=15,
+            false => 1..=6,
         };
-        Some([ear(left, false), ear(right, true)])
+        let centre = Self::CENTRE[1] as i32;
+        tracks.min_by_key(|&t| {
+            let d = (i32::from(Self::LOUDNESS[t]) - loudness).abs();
+            (d, (t as i32 - centre).abs())
+        })
     }
 
     /// Routes the centre voices over the three middle tracks. The centre track
@@ -172,7 +202,7 @@ impl Template {
     /// signal still runs through.
     fn relay(&self, y: i32, track: usize, x: i32) -> Option<GenericBlockState> {
         use WireConn::{None as Open, Side};
-        const CENTRE_X: i32 = 40;
+        const CENTRE_X: i32 = 39;
         let slots = &self.slots[track];
         let split = slots[1].is_some() || slots[2].is_some();
         let bare_heart = x == CENTRE_X && slots[0].is_none() && split;
@@ -184,9 +214,9 @@ impl Template {
 
     /// Records a voice, spilling outward onto the quieter tracks once its own is full.
     fn put(&mut self, track: usize, tone: Tone) {
-        let step: i32 = if track <= 4 { -1 } else { 1 };
+        let step: i32 = if track < Self::CENTRE[1] { -1 } else { 1 };
         let mut outward = iter::successors(Some(track as i32), move |&t| {
-            (0..=12).contains(&(t + step)).then(|| t + step)
+            (0..=16).contains(&(t + step)).then(|| t + step)
         });
         let _ = outward.any(|t| self.try_put(t as usize, tone));
     }
@@ -205,11 +235,9 @@ impl Template {
 
 impl Layout for Template {
     fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
-        // The tracks' centre x positions, leftmost outward track to rightmost, and
-        // each track's three slots as x offsets from its centre: middle, left, right.
-        const TRACK_X: [i32; 13] = [1, 4, 8, 14, 24, 37, 40, 43, 56, 66, 72, 76, 79];
+        // Each track's three slots as x offsets from its centre: middle, left, right.
         const SLOT_DX: [i32; 3] = [0, -1, 1];
-        let cell = TRACK_X.iter().enumerate().find_map(|(track, &c)| {
+        let cell = TRACK.iter().enumerate().find_map(|(track, &c)| {
             let slot = SLOT_DX.iter().position(|&dx| c + dx == pos.x)?;
             Some((track, slot))
         });
@@ -227,7 +255,7 @@ impl Layout for Template {
     }
 
     fn size(&self) -> BlockPos {
-        BlockPos::new(81, 2, 2)
+        BlockPos::new(79, 2, 2)
     }
 }
 
@@ -239,31 +267,32 @@ impl Layout for Linkage {
         use WireConn::{None as Open, Side};
         match (pos.z, pos.y, pos.x) {
             // z0..=z2
-            (0..=2, 0, 40) => Some(chain_block()),
-            (0, 1, 40) => Some(button()),
-            (1..=2, 1, 40) => Some(repeater("4", Facing::South, false, false)),
+            (0..=2, 0, 39) => Some(chain_block()),
+            (0, 1, 39) => Some(button()),
+            (1..=2, 1, 39) => Some(repeater("4", Facing::South, false, false)),
             // z3
-            (3, 1, 9 | 25) => Some(repeater("1", Facing::West, false, false)),
-            (3, 1, 55 | 71) => Some(repeater("1", Facing::East, false, false)),
+            (3, 1, 8 | 24) => Some(repeater("1", Facing::West, false, false)),
+            (3, 1, 54 | 70) => Some(repeater("1", Facing::East, false, false)),
             (3, 1, 1) => Some(wire_state(Open, Side, Open, Side, "0")),
-            (3, 1, 79) => Some(wire_state(Side, Open, Open, Side, "0")),
-            (3, 1, 40) => Some(wire_state(Side, Side, Side, Side, "0")),
-            (3, 1, 4 | 8 | 14 | 24 | 37) => Some(wire_state(Side, Side, Open, Side, "0")),
-            (3, 1, 43 | 56 | 66 | 72 | 76) => Some(wire_state(Side, Side, Open, Side, "0")),
-            (3, 0, 1..=79) => Some(chain_block()),
-            (3, 1, 1..=79) => Some(wire_state(Side, Side, Open, Open, "0")),
+            (3, 1, 77) => Some(wire_state(Side, Open, Open, Side, "0")),
+            (3, 1, 39) => Some(wire_state(Side, Side, Side, Side, "0")),
+            // The bus taps every track but the ends and centre.
+            (3, 1, x) if TRACK[1..8].contains(&x) || TRACK[9..16].contains(&x) => {
+                Some(wire_state(Side, Side, Open, Side, "0"))
+            }
+            (3, 0, 1..=77) => Some(chain_block()),
+            (3, 1, 1..=77) => Some(wire_state(Side, Side, Open, Open, "0")),
             // z4
-            (4, 0, 1 | 4 | 8 | 14 | 24 | 37) => Some(chain_block()),
-            (4, 0, 40 | 43 | 56 | 66 | 72 | 76 | 79) => Some(chain_block()),
-            (4, 1, 1 | 4 | 8 | 72 | 76 | 79) => Some(repeater("2", Facing::South, false, false)),
-            (4, 1, 14 | 24 | 56 | 66) => Some(repeater("3", Facing::South, false, false)),
-            (4, 1, 37 | 40 | 43) => Some(repeater("4", Facing::South, false, false)),
+            (4, 0, x) if TRACK.contains(&x) => Some(chain_block()),
+            (4, 1, 29 | 36 | 39 | 42 | 49) => Some(repeater("4", Facing::South, false, false)),
+            (4, 1, 11 | 16 | 22 | 56 | 62 | 67) => Some(repeater("3", Facing::South, false, false)),
+            (4, 1, 1 | 4 | 7 | 71 | 74 | 77) => Some(repeater("2", Facing::South, false, false)),
             _ => None,
         }
     }
 
     fn size(&self) -> BlockPos {
-        BlockPos::new(81, 2, 5)
+        BlockPos::new(79, 2, 5)
     }
 }
 
