@@ -6,11 +6,13 @@ use rustmatica::{Litematic, Region};
 use std::borrow::Cow;
 
 pub use self::blocks::*;
+pub use self::cascade::*;
 pub use self::compact::*;
 pub use self::fishbone::*;
 pub use self::linear::*;
 pub use self::tapped::*;
 mod blocks;
+mod cascade;
 mod compact;
 mod fishbone;
 mod linear;
