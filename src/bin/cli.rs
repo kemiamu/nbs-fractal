@@ -1,8 +1,9 @@
 use clap::Parser;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
-use nbs_fractal::schematic::{Layout, MultiCompactLayout, MultiFishboneLayout, MultiLinearLayout};
-use nbs_fractal::schematic::{StackedLinearLayout, TappedLayout, WithFloor};
+use nbs_fractal::heard;
+use nbs_fractal::schematic::{CascadeLayout, Layout, MultiCompactLayout, MultiFishboneLayout};
+use nbs_fractal::schematic::{MultiLinearLayout, StackedLinearLayout, TappedLayout, WithFloor};
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::{Layer, Song};
 use rsnbs::types::{LayerAnchor, Position, Tick, TimeAnchor};
@@ -25,6 +26,7 @@ enum Cli {
     Compact(Compact),
     Linear(Linear),
     Fishbone(Fishbone),
+    Cascade(Cascade),
     Decompose(Decompose),
     Match(Match),
     Tapped(Tapped),
@@ -35,6 +37,7 @@ fn main() {
         Cli::Compact(cmd) => cmd.run(),
         Cli::Linear(cmd) => cmd.run(),
         Cli::Fishbone(cmd) => cmd.run(),
+        Cli::Cascade(cmd) => cmd.run(),
         Cli::Decompose(cmd) => cmd.run(),
         Cli::Match(cmd) => cmd.run(),
         Cli::Tapped(cmd) => cmd.run(),
@@ -218,6 +221,41 @@ impl Fishbone {
         };
         let layout = MultiFishboneLayout::new(tracks, self.gap, song_length);
         let description = format!("Fishbone from {}", self.input);
+        let litematic = build_schematic(layout, self.floor, description);
+        write_output(&self.output, litematic);
+    }
+}
+
+// Cascade
+//
+// ++++++++++++============++++++++++++============++++++++++++============
+
+/// Cascade layout
+#[derive(clap::Args)]
+struct Cascade {
+    /// Path to input NBS file
+    input: String,
+    /// Path to output litematic file
+    #[arg(default_value = "out/generated_cascade.litematic")]
+    output: String,
+    /// Floor platform mode
+    #[arg(short = 'F', long, value_enum, default_value_t)]
+    floor: Floor,
+}
+
+impl Cascade {
+    fn run(self) {
+        let song = open_song(&self.input);
+        let Song {
+            header,
+            notes,
+            layers,
+            ..
+        } = song;
+        let notes = notes.rescale_to_game_tick(header.tempo);
+        let notes = heard(notes, &layers);
+        let layout = CascadeLayout::new(notes);
+        let description = format!("Cascade from {}", self.input);
         let litematic = build_schematic(layout, self.floor, description);
         write_output(&self.output, litematic);
     }
