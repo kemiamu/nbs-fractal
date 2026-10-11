@@ -47,7 +47,11 @@ fn main() {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Compact layout
+/// Layout (Compact): Compact variable-length packed structure.
+///
+/// Footprint first: the event stream is packed into densely stacked cells,
+/// giving a variable-length structure with no wasted gaps. It supports periodic
+/// signals and accommodates Java Edition's terminal-repeater behaviour.
 #[derive(clap::Args)]
 struct Compact {
     /// Path to input NBS file
@@ -135,7 +139,10 @@ where
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Linear layout
+/// Layout (Linear): Foldable timeline with side branches.
+///
+/// Each backbone can carry one unit of branch, played evenly along time,
+/// supporting 20 t/s. The wrap option folds it.
 #[derive(clap::Args)]
 struct Linear {
     /// Path to input NBS file
@@ -184,7 +191,9 @@ impl Linear {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Fishbone layout, consuming the song's native ticks as-is (no retick).
+/// Layout (Fishbone): Linear timeline with side branches.
+///
+/// Each backbone can carry three units of branches, played evenly along time.
 #[derive(clap::Args)]
 struct Fishbone {
     /// Path to input NBS file
@@ -223,7 +232,10 @@ impl Fishbone {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Cascade layout
+/// Layout (Cascade): Multi-track timeline with pan and volume.
+///
+/// Multiple tracks run in parallel, played evenly along time. The design can
+/// reproduce volume and panning.
 #[derive(clap::Args)]
 struct Cascade {
     /// Path to input NBS file
@@ -253,7 +265,10 @@ impl Cascade {
 
 // **Experimental**: output may change.
 
-/// Decompose an NBS song into automatically matched TEC groups.
+/// Automatically decompose NBS files into TEC groups.
+///
+/// Decomposes translation equivalence classes automatically, and saves them in
+/// NBS format.
 #[derive(clap::Args)]
 struct Decompose {
     /// Path to input NBS file
@@ -277,16 +292,18 @@ impl Decompose {
             .map(|(pos, note)| (pos.into_tick(), note.tone));
         let all_plane: TePlane<Tone> = points.collect();
 
-        // 层数预算：分解在预算耗尽时停止；0 = 无预算（残差无任何同音色配对）。
+        // Layer budget: decomposition stops once the budget runs out; 0 = no
+        // budget (the residual keeps no same-tone pairing).
         let max_layers = match self.layers {
             0 => usize::MAX,
             n => n,
         };
         let (plan, _, residual) = reuse_flow(&all_plane, 6, max_layers);
 
-        // 中继器粒度限制：过滤掉最小间隔小于 8（coarse < 4）的层，把它们
-        // 吸收回残差，保证输出能被 TappedLayout 安全消费；残差作为无偏移
-        // 层保留。
+        // Repeater granularity limit: layers whose minimum gap is under 8
+        // (coarse < 4) are filtered out and absorbed back into the residual, so
+        // the output can be safely consumed by TappedLayout; the residual is
+        // kept as an offset-free layer.
         let (tecs, skipped) = plan_to_tecs(plan, residual);
         if skipped > 0 {
             eprintln!("decompose: skipped {skipped} layer(s) below tapped granularity");
@@ -306,11 +323,10 @@ impl Decompose {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Decompose the song into TEC groups and re-emit it as an NBS.
+/// Manually decompose NBS files into TEC groups.
 ///
-/// Rule offsets are interpreted in the song's own (file) tick, so each TEC
-/// group is written on its own layers, separated from the next by a blank
-/// layer. Original layer assignments are discarded.
+/// Decomposes translation equivalence classes from manually entered match
+/// rules, and saves them in NBS format.
 #[derive(clap::Args)]
 struct Match {
     /// Path to input NBS file
@@ -405,9 +421,11 @@ impl FromStr for Rule {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Build a Tapped layout from a grouped NBS, as emitted by `match`/`decompose`.
+/// Layout (Tapped): Simulate TEC via tapped delay line.
 ///
-/// The input's layers are TEC groups separated by blank layers.
+/// Tapped Layout is a direct descriptive structure for the translation
+/// equivalence class design: a tapped delay line controls the repetition
+/// pattern, using Compact Layout as its playing unit.
 #[derive(clap::Args)]
 struct Tapped {
     /// Path to input NBS file
