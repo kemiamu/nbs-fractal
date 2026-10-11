@@ -1167,9 +1167,9 @@ checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 
 [[package]]
 name = "rsnbs"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f89d3ebc4c43750d48dcc0f80f33f8dd851b69108b530af20acdfb57e00be006"
+checksum = "308f0e51dd91ef992464f367a04086f7f319324b1acb9ed4ec10d89845127646"
 dependencies = [
  "encoding_rs",
  "thiserror",
