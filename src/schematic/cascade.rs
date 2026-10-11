@@ -121,18 +121,13 @@ impl Template {
 
     /// The side tracks a voice falls between, or `None` when it belongs in the centre.
     fn route(volume: u8, panning: i8) -> Option<[Option<usize>; 2]> {
-        const CENTRE: i32 = 95;
-        let (left, right) = Self::ears(volume, panning);
-        if left >= CENTRE && right >= CENTRE {
+        let (v, p) = (i32::from(volume), i32::from(panning));
+        let (left, right) = (v * (100 - p.max(0)) / 100, v * (100 + p.min(0)) / 100);
+        const FULL: i32 = 95;
+        if left >= FULL && right >= FULL {
             return None;
         }
         Some([Self::side(left, false), Self::side(right, true)])
-    }
-
-    /// Splits a voice's loudness between the two ears under its panning.
-    fn ears(volume: u8, panning: i8) -> (i32, i32) {
-        let (v, p) = (i32::from(volume), i32::from(panning));
-        (v * (100 - p.max(0)) / 100, v * (100 + p.min(0)) / 100)
     }
 
     /// The track on one side nearest a loudness; `None` when the ear is silent.
@@ -140,14 +135,14 @@ impl Template {
         if loudness <= 0 {
             return None;
         }
-        let tracks = match east {
-            true => 10..=15,
-            false => 1..=6,
+        let [west, mid, east_edge] = Self::CENTRE;
+        let band = match east {
+            true => east_edge + 1..Self::LOUDNESS.len(),
+            false => 1..west,
         };
-        let centre = Self::CENTRE[1] as i32;
-        tracks.min_by_key(|&t| {
-            let d = (i32::from(Self::LOUDNESS[t]) - loudness).abs();
-            (d, (t as i32 - centre).abs())
+        band.min_by_key(|&t| {
+            let near = (i32::from(Self::LOUDNESS[t]) - loudness).abs();
+            (near, (t as i32 - mid as i32).abs())
         })
     }
 
@@ -156,23 +151,22 @@ impl Template {
     /// any overflow spills to the quieter side tracks, alternating sides.
     fn balance(&mut self, centre: &[Tone]) {
         let count = centre.len();
-        let middle = match count {
-            0..=3 => count,
-            _ if count % 2 == 1 => 3,
-            _ => 2,
+        // The middle track takes the centre share; an even share above three skips
+        // its heart slot, which the relay bridges, so the centre stays balanced.
+        let middle = match count > 3 && count % 2 == 0 {
+            true => 2,
+            false => count.min(3),
         };
         let outer = ((count - middle) / 2).min(3);
         let [west, mid, east] = Self::CENTRE;
         let mut rest = centre;
         for (track, share) in [(mid, middle), (west, outer), (east, outer)] {
-            let share = share.min(rest.len());
-            // The centre track balances an even pair by skipping its middle; every
-            // other track keeps its middle, which is what powers it.
-            let order = match track == mid && share == 2 {
+            let take = share.min(rest.len());
+            let order = match track == mid && take == 2 {
                 true => [1, 2, 0],
                 false => Self::order(track),
             };
-            let (chunk, tail) = rest.split_at(share);
+            let (chunk, tail) = rest.split_at(take);
             Self::spread(&mut self.slots[track], chunk, order);
             rest = tail;
         }
@@ -202,10 +196,9 @@ impl Template {
     /// signal still runs through.
     fn relay(&self, y: i32, track: usize, x: i32) -> Option<GenericBlockState> {
         use WireConn::{None as Open, Side};
-        const CENTRE_X: i32 = 39;
         let slots = &self.slots[track];
         let split = slots[1].is_some() || slots[2].is_some();
-        let bare_heart = x == CENTRE_X && slots[0].is_none() && split;
+        let bare_heart = x == TRACK[Self::CENTRE[1]] && slots[0].is_none() && split;
         if y == 0 || bare_heart {
             return Some(chain_block());
         }
@@ -216,7 +209,9 @@ impl Template {
     fn put(&mut self, track: usize, tone: Tone) {
         let step: i32 = if track < Self::CENTRE[1] { -1 } else { 1 };
         let mut outward = iter::successors(Some(track as i32), move |&t| {
-            (0..=16).contains(&(t + step)).then(|| t + step)
+            (0..Self::LOUDNESS.len() as i32)
+                .contains(&(t + step))
+                .then(|| t + step)
         });
         let _ = outward.any(|t| self.try_put(t as usize, tone));
     }
@@ -255,7 +250,7 @@ impl Layout for Template {
     }
 
     fn size(&self) -> BlockPos {
-        BlockPos::new(79, 2, 2)
+        BlockPos::new(TRACK[TRACK.len() - 1] + 2, 2, 2)
     }
 }
 
