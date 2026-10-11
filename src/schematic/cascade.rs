@@ -108,9 +108,9 @@ impl Template {
     }
 
     /// Routes one voice: into the centre list, or onto its pair of side tracks.
-    fn place(&mut self, note: Note, centre: &mut Vec<Tone>) {
+    fn place(&mut self, note: Note, centre: &mut Vec<(Tone, u8)>) {
         let Some(tracks) = Self::route(note.velocity.get(), note.panning.get()) else {
-            centre.push(note.tone);
+            centre.push((note.tone, note.velocity.get()));
             return;
         };
         tracks
@@ -148,8 +148,9 @@ impl Template {
 
     /// Routes the centre voices over the three middle tracks. The centre track
     /// takes as many as it can while staying balanced and the outer two mirror it;
-    /// any overflow spills to the quieter side tracks, alternating sides.
-    fn balance(&mut self, centre: &[Tone]) {
+    /// any overflow splits in two at half loudness, each voice leaving a half on
+    /// the matching tracks to either side of the middle stack.
+    fn balance(&mut self, centre: &[(Tone, u8)]) {
         let count = centre.len();
         // The middle track takes the centre share; an even share above three skips
         // its heart slot, which the relay bridges, so the centre stays balanced.
@@ -170,8 +171,10 @@ impl Template {
             Self::spread(&mut self.slots[track], chunk, order);
             rest = tail;
         }
-        for (side, &tone) in rest.iter().enumerate() {
-            self.put(if side % 2 == 0 { west - 1 } else { east + 1 }, tone);
+        for &(tone, level) in rest {
+            let half = i32::from(level) / 2;
+            let sides = [Self::side(half, false), Self::side(half, true)];
+            sides.into_iter().flatten().for_each(|t| self.put(t, tone));
         }
     }
 
@@ -186,8 +189,8 @@ impl Template {
     }
 
     /// Lays a track's voices onto its slots, in the given order.
-    fn spread(slots: &mut [Option<Tone>; 3], tones: &[Tone], order: [usize; 3]) {
-        for (&slot, &tone) in order.iter().zip(tones) {
+    fn spread(slots: &mut [Option<Tone>; 3], tones: &[(Tone, u8)], order: [usize; 3]) {
+        for (&slot, &(tone, _)) in order.iter().zip(tones) {
             slots[slot] = Some(tone);
         }
     }
