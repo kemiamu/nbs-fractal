@@ -1,12 +1,11 @@
 use clap::Parser;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
-use nbs_fractal::heard;
 use nbs_fractal::schematic::{CascadeLayout, Layout, MultiCompactLayout, MultiFishboneLayout};
 use nbs_fractal::schematic::{MultiLinearLayout, StackedLinearLayout, TappedLayout, WithFloor};
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::{Layer, Song};
-use rsnbs::types::{LayerAnchor, Position, Tick, TimeAnchor};
+use rsnbs::types::{Position, Tick, TimeAnchor};
 use rustmatica::Litematic;
 use std::collections::BTreeSet;
 use std::num::NonZero;
@@ -162,10 +161,7 @@ impl Linear {
     fn run(self) {
         let song = open_song(&self.input);
         let notes: Notes = song.notes.rescale_to_game_tick(song.header.tempo).collect();
-        let song_length = notes
-            .last_key_value()
-            .map(|(pos, _)| pos.into_tick() + 1)
-            .unwrap_or(0);
+        let song_length = notes.tick_count();
         let tracks: Vec<Notes> = match self.no_breaks {
             true => vec![notes],
             false => notes.split_by_layer_gaps(),
@@ -211,10 +207,7 @@ impl Fishbone {
     fn run(self) {
         let song = open_song(&self.input);
         let notes: Notes = song.notes;
-        let song_length = notes
-            .last_key_value()
-            .map(|(pos, _)| pos.into_tick() + 1)
-            .unwrap_or(0);
+        let song_length = notes.tick_count();
         let tracks: Vec<Notes> = match self.no_breaks {
             true => vec![notes],
             false => notes.split_by_layer_gaps(),
@@ -246,8 +239,7 @@ struct Cascade {
 impl Cascade {
     fn run(self) {
         let song = open_song(&self.input);
-        let Song { notes, layers, .. } = song;
-        let notes = heard(notes, &layers);
+        let notes = song.resolved_notes();
         let layout = CascadeLayout::new(notes);
         let description = format!("Cascade from {}", self.input);
         let litematic = build_schematic(layout, self.floor, description);
@@ -387,9 +379,9 @@ fn tec_notes(tec: BoundedTec<Tone>) -> Notes<Position, Note> {
 /// blank layer between groups. Original layer assignments are discarded.
 fn write_tec_groups(mut song: Song, tecs: Vec<BoundedTec<Tone>>, output: &str, name: String) {
     let notes: Notes<Position, Note> = tecs.into_iter().map(tec_notes).concat().collect();
-    let last = notes.keys().map(|pos| pos.into_layer()).max();
+    let layers = notes.layer_count() as usize;
     song.notes = notes;
-    song.layers = vec![Layer::default(); last.map_or(0, |l| l as usize + 1)];
+    song.layers = vec![Layer::default(); layers];
     song.header.song_name = name;
     write_song(output, song);
 }
