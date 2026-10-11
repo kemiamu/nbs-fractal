@@ -246,13 +246,7 @@ struct Cascade {
 impl Cascade {
     fn run(self) {
         let song = open_song(&self.input);
-        let Song {
-            header,
-            notes,
-            layers,
-            ..
-        } = song;
-        let notes = notes.rescale_to_game_tick(header.tempo);
+        let Song { notes, layers, .. } = song;
         let notes = heard(notes, &layers);
         let layout = CascadeLayout::new(notes);
         let description = format!("Cascade from {}", self.input);

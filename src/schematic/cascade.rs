@@ -68,19 +68,19 @@ impl AsLayout for CascadeLayout {
 /// One tick of the wall: the voices its tracks carry, three slots per track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Template {
-    slots: [[Option<Tone>; 3]; 11],
+    slots: [[Option<Tone>; 3]; 13],
 }
 
 impl Template {
     /// The three centre tracks, left inner to right inner.
-    const CENTRE: [usize; 3] = [4, 5, 6];
+    const CENTRE: [usize; 3] = [5, 6, 7];
 
     /// Fills a row with the voices to sound on its tick, placing each by how it is
     /// heard: loudness picks the track, panning divides the sides, and the loudest
     /// voices stack in the centre.
     fn new<I: IntoIterator<Item = Note>>(notes: I) -> Self {
         let mut template = Self {
-            slots: [[None; 3]; 11],
+            slots: [[None; 3]; 13],
         };
         // A voice the wall cannot sound never takes a slot; it would only push the
         // voices that do onto the sides and leave the centre bare.
@@ -114,9 +114,9 @@ impl Template {
         if ring(left) == LOUDEST && ring(right) == LOUDEST {
             return None;
         }
-        let ear = |loudness: i32, west: bool| {
+        let ear = |loudness: i32, east: bool| {
             let track = ring(loudness).min(LOUDEST - 1);
-            (loudness > 0).then(|| if west { 10 - track } else { track })
+            (loudness > 0).then(|| if east { 11 - track } else { 1 + track })
         };
         Some([ear(left, false), ear(right, true)])
     }
@@ -172,7 +172,7 @@ impl Template {
     /// signal still runs through.
     fn relay(&self, y: i32, track: usize, x: i32) -> Option<GenericBlockState> {
         use WireConn::{None as Open, Side};
-        const CENTRE_X: i32 = 37;
+        const CENTRE_X: i32 = 40;
         let slots = &self.slots[track];
         let split = slots[1].is_some() || slots[2].is_some();
         let bare_heart = x == CENTRE_X && slots[0].is_none() && split;
@@ -184,9 +184,9 @@ impl Template {
 
     /// Records a voice, spilling outward onto the quieter tracks once its own is full.
     fn put(&mut self, track: usize, tone: Tone) {
-        let step: i32 = if track <= 3 { -1 } else { 1 };
+        let step: i32 = if track <= 4 { -1 } else { 1 };
         let mut outward = iter::successors(Some(track as i32), move |&t| {
-            (0..=10).contains(&(t + step)).then(|| t + step)
+            (0..=12).contains(&(t + step)).then(|| t + step)
         });
         let _ = outward.any(|t| self.try_put(t as usize, tone));
     }
@@ -207,7 +207,7 @@ impl Layout for Template {
     fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
         // The tracks' centre x positions, leftmost outward track to rightmost, and
         // each track's three slots as x offsets from its centre: middle, left, right.
-        const TRACK_X: [i32; 11] = [1, 5, 11, 21, 34, 37, 40, 53, 63, 69, 73];
+        const TRACK_X: [i32; 13] = [1, 4, 8, 14, 24, 37, 40, 43, 56, 66, 72, 76, 79];
         const SLOT_DX: [i32; 3] = [0, -1, 1];
         let cell = TRACK_X.iter().enumerate().find_map(|(track, &c)| {
             let slot = SLOT_DX.iter().position(|&dx| c + dx == pos.x)?;
@@ -227,7 +227,7 @@ impl Layout for Template {
     }
 
     fn size(&self) -> BlockPos {
-        BlockPos::new(75, 2, 2)
+        BlockPos::new(81, 2, 2)
     }
 }
 
@@ -239,30 +239,31 @@ impl Layout for Linkage {
         use WireConn::{None as Open, Side};
         match (pos.z, pos.y, pos.x) {
             // z0..=z2
-            (0..=2, 0, 37) => Some(chain_block()),
-            (0, 1, 37) => Some(button()),
-            (1..=2, 1, 37) => Some(repeater("4", Facing::South, false, false)),
+            (0..=2, 0, 40) => Some(chain_block()),
+            (0, 1, 40) => Some(button()),
+            (1..=2, 1, 40) => Some(repeater("4", Facing::South, false, false)),
             // z3
-            (3, 1, 6 | 22) => Some(repeater("1", Facing::West, false, false)),
-            (3, 1, 52 | 68) => Some(repeater("1", Facing::East, false, false)),
+            (3, 1, 9 | 25) => Some(repeater("1", Facing::West, false, false)),
+            (3, 1, 55 | 71) => Some(repeater("1", Facing::East, false, false)),
             (3, 1, 1) => Some(wire_state(Open, Side, Open, Side, "0")),
-            (3, 1, 73) => Some(wire_state(Side, Open, Open, Side, "0")),
-            (3, 1, 37) => Some(wire_state(Side, Side, Side, Side, "0")),
-            (3, 1, 5 | 11 | 21 | 34) => Some(wire_state(Side, Side, Open, Side, "0")),
-            (3, 1, 40 | 53 | 63 | 69) => Some(wire_state(Side, Side, Open, Side, "0")),
-            (3, 0, 1..=73) => Some(chain_block()),
-            (3, 1, 1..=73) => Some(wire_state(Side, Side, Open, Open, "0")),
+            (3, 1, 79) => Some(wire_state(Side, Open, Open, Side, "0")),
+            (3, 1, 40) => Some(wire_state(Side, Side, Side, Side, "0")),
+            (3, 1, 4 | 8 | 14 | 24 | 37) => Some(wire_state(Side, Side, Open, Side, "0")),
+            (3, 1, 43 | 56 | 66 | 72 | 76) => Some(wire_state(Side, Side, Open, Side, "0")),
+            (3, 0, 1..=79) => Some(chain_block()),
+            (3, 1, 1..=79) => Some(wire_state(Side, Side, Open, Open, "0")),
             // z4
-            (4, 0, 1 | 5 | 11 | 21 | 34 | 37 | 40 | 53 | 63 | 69 | 73) => Some(chain_block()),
-            (4, 1, 1 | 5 | 69 | 73) => Some(repeater("2", Facing::South, false, false)),
-            (4, 1, 11 | 21 | 53 | 63) => Some(repeater("3", Facing::South, false, false)),
-            (4, 1, 34 | 37 | 40) => Some(repeater("4", Facing::South, false, false)),
+            (4, 0, 1 | 4 | 8 | 14 | 24 | 37) => Some(chain_block()),
+            (4, 0, 40 | 43 | 56 | 66 | 72 | 76 | 79) => Some(chain_block()),
+            (4, 1, 1 | 4 | 8 | 72 | 76 | 79) => Some(repeater("2", Facing::South, false, false)),
+            (4, 1, 14 | 24 | 56 | 66) => Some(repeater("3", Facing::South, false, false)),
+            (4, 1, 37 | 40 | 43) => Some(repeater("4", Facing::South, false, false)),
             _ => None,
         }
     }
 
     fn size(&self) -> BlockPos {
-        BlockPos::new(75, 2, 5)
+        BlockPos::new(81, 2, 5)
     }
 }
 
