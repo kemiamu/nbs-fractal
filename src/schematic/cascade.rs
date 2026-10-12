@@ -86,7 +86,7 @@ impl Template {
     /// Each track's declared loudness, percent; the centre is full strength and
     /// the sides fall off a touch faster the further out they sit.
     const LOUDNESS: [u8; 17] = [
-        0, 10, 20, 30, 50, 70, 90, 100, 100, 100, 90, 70, 50, 30, 20, 10, 0,
+        0, 5, 15, 30, 50, 70, 90, 100, 100, 100, 90, 70, 50, 30, 15, 5, 0,
     ];
 
     /// Fills a row with the voices to sound on its tick, placing each on the
@@ -123,8 +123,8 @@ impl Template {
     /// Each ear rounds up, so it leans to the heavier side rather than the lighter.
     fn route(volume: u8, panning: i8) -> Option<[Option<usize>; 2]> {
         let (v, p) = (i32::from(volume), i32::from(panning));
-        let left = (v * (100 - p.max(0)) + 88) / 100;
-        let right = (v * (100 + p.min(0)) + 88) / 100;
+        let left = (v * (100 - p.max(0)) + 50) / 100;
+        let right = (v * (100 + p.min(0)) + 50) / 100;
         const FULL: i32 = 95;
         if left >= FULL && right >= FULL {
             return None;
