@@ -11,12 +11,14 @@ pub use self::compact::*;
 pub use self::fishbone::*;
 pub use self::linear::*;
 pub use self::tapped::*;
+pub use self::torrent::*;
 mod blocks;
 mod cascade;
 mod compact;
 mod fishbone;
 mod linear;
 mod tapped;
+mod torrent;
 
 // Layout & AsLayout
 //
