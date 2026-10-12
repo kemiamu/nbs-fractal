@@ -1,6 +1,9 @@
 use super::{AsLayout, Layout};
-use rsnbs::note::Note;
+use super::{air, inst_block, note_block};
+use mcdata::{GenericBlockState, util::BlockPos};
+use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
+use std::collections::{BTreeMap, HashMap};
 
 pub struct TorrentLayout;
 
@@ -23,7 +26,10 @@ impl AsLayout for TorrentLayout {
 }
 
 #[allow(dead_code)]
-struct Template;
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Template {
+    slots: BTreeMap<(i32, i32), Tone>,
+}
 
 #[allow(dead_code)]
 impl Template {
@@ -110,5 +116,43 @@ impl Template {
     fn new<I: IntoIterator<Item = Note>>(notes: I) -> Self {
         let _ = notes;
         todo!()
+    }
+
+    /// Scores how alike two heard positions are, so a voice can be matched to the
+    /// slot that hears it nearest: zero when they coincide and larger as they
+    /// drift apart in panning and volume. Panning weighs more than volume, though
+    /// the exact balance is not pinned down.
+    ///
+    /// Panning and volume carry no settled meaning yet, so this may move onto a
+    /// dedicated type once one exists; for now the pair stays a plain tuple.
+    fn score(a: (i8, u8), b: (i8, u8)) -> i32 {
+        let dp = i32::from(a.0) - i32::from(b.0);
+        let dv = i32::from(a.1) - i32::from(b.1);
+        dp * dp + dv * dv
+    }
+}
+
+impl Layout for Template {
+    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+        let note = self.slots.get(&(pos.x, pos.y)).copied();
+        let inst = self.slots.get(&(pos.x, pos.y + 1)).copied();
+        match (pos.z, note, inst) {
+            (1, _, Some(tone)) => Some(inst_block(Some(tone), air)),
+            (1, Some(tone), _) => Some(note_block(Some(tone), air)),
+            _ => todo!(),
+        }
+    }
+
+    fn size(&self) -> BlockPos {
+        BlockPos::new(99, 71, 2)
+    }
+}
+
+/// The barrier that scaffolds a track.
+#[allow(dead_code)]
+fn barrier() -> GenericBlockState {
+    GenericBlockState {
+        name: "minecraft:barrier".into(),
+        properties: HashMap::from([("waterlogged".into(), "false".into())]),
     }
 }
