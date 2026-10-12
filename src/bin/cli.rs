@@ -274,7 +274,7 @@ struct Decompose {
     /// Path to input NBS file
     input: String,
     /// Path to output NBS file
-    #[arg(default_value = "out/generated_decompose.nbs")]
+    #[arg(default_value = "out/generated_decompose.tec.nbs")]
     output: String,
     /// Max number of layers (TECs) to generate; 0 = no budget
     #[arg(short, long, default_value_t = 2)]
@@ -332,7 +332,7 @@ struct Match {
     /// Path to input NBS file
     input: String,
     /// Path to output NBS file
-    #[arg(default_value = "out/generated_match.nbs")]
+    #[arg(default_value = "out/generated_match.tec.nbs")]
     output: String,
     /// Match rule offsets, slash-separated; multiple rules in order
     #[arg(short, long, num_args = 1..)]
