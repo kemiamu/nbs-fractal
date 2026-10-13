@@ -1,27 +1,82 @@
-use super::{AsLayout, Layout};
-use super::{air, inst_block, note_block};
+use super::{AsLayout, EvenlyArranged, Facing, Layout, Overlaid, WireConn};
+use super::{air, chain_block, inst_block, note_block, repeater, wire_state};
+use crate::playable;
 use mcdata::{GenericBlockState, util::BlockPos};
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
 use std::collections::{BTreeMap, HashMap};
+use std::iter;
 
-pub struct TorrentLayout;
+// Layout: TorrentLayout
+//
+// A torrent reads as a tunnel built from a series of slices rather than a
+// single row: every tick lays a whole slice, and silent ticks keep their slice
+// so the tunnel stays evenly spaced. The tunnel is read from one fixed
+// viewpoint, so each voice is placed by where it is heard. The whole torrent
+// fires from one fixed startup.
+//
+// ++++++++++++============++++++++++++============++++++++++++============
+
+/// A note stream projected as a torrent: one slice per tick off a fixed startup.
+pub struct TorrentLayout(Overlaid<Linkage, EvenlyArranged<Template>>);
 
 impl TorrentLayout {
+    /// Projects a note stream, one slice per redstone tick.
     pub fn new<Trk, A, T>(notes: Trk) -> Self
     where
         Trk: IntoIterator<Item = (A, T)>,
         A: TimeAnchor,
         T: Into<Note>,
     {
-        let _ = notes;
-        todo!()
+        let mut notes = notes
+            .into_iter()
+            .map(|(anchor, note)| (anchor.into_tick(), note.into()))
+            .peekable();
+        let mut slices: Vec<Template> = Vec::new();
+        while let Some(&(next, _)) = notes.peek() {
+            let len = (next as usize).max(slices.len());
+            slices.resize_with(len, || Template::new(iter::empty()));
+            let slice = iter::from_fn(|| notes.next_if(|&(t, _)| t == next).map(|(_, note)| note));
+            slices.push(Template::new(slice));
+        }
+        if slices.is_empty() {
+            slices.push(Template::new(iter::empty()));
+        }
+
+        let linkage = Linkage;
+        let anchor = BlockPos::new(0, 0, linkage.size().z - 1);
+        let slices = EvenlyArranged::new(slices, BlockPos::new(0, 0, 2));
+        let size = BlockPos::new(slices.size().x, slices.size().y, anchor.z + slices.size().z);
+        let layout = Overlaid::new(BlockPos::ORIGIN, linkage, anchor, slices, size);
+        Self(layout)
     }
 }
 
 impl AsLayout for TorrentLayout {
     fn as_layout(&self) -> &impl Layout {
-        &()
+        &self.0
+    }
+}
+
+// Templates: Template & Linkage
+//
+// Linkage is the fixed front that sets every track running together; Template
+// is one slice of the tunnel. Every slot is heard at a panning and volume from
+// the axis, so a voice lands on the slot that hears it nearest, and each slot
+// holds only one voice.
+//
+// ++++++++++++============++++++++++++============++++++++++++============
+
+/// The fixed startup that sets every track running together.
+struct Linkage;
+
+impl Layout for Linkage {
+    fn block_at(&self, _pos: BlockPos) -> Option<GenericBlockState> {
+        todo!()
+    }
+
+    fn size(&self) -> BlockPos {
+        todo!()
     }
 }
 
@@ -33,10 +88,10 @@ struct Template {
 
 #[allow(dead_code)]
 impl Template {
-    /// The wall as a picture: one row per layer from the top (y = 70) down to the
+    /// The slice as a picture: one row per layer from the top (y = 70) down to the
     /// bottom (y = 2), one character per grid step from the left across, `#` a
     /// track centre and `.` an empty cell. The grid spans x = 1, 5, …, 97.
-    const WALL: [&str; 18] = [
+    const SLICE: [&str; 18] = [
         "..#.........#.........#..",
         ".##.......#####.......##.",
         ".###...##...#...##...###.",
@@ -60,8 +115,8 @@ impl Template {
     /// The track centres, top row first and left to right within a row.
     const TRACKS: [(i32, i32); 176] = Self::tracks();
 
-    /// The wall's pivot: the central track on the source row, as the listener's
-    /// place in the wall's own plane.
+    /// The slice's pivot: the central track on the source row, as the listener's
+    /// place in the slice's own plane.
     const AXIS: (i32, i32) = (49, 46);
 
     /// Each slot: the panning and volume it is heard at from `AXIS`, with its own
@@ -97,25 +152,38 @@ impl Template {
         slots
     }
 
-    /// Reads `WALL` back onto the wall's four-step grid. Every cell writes the
+    /// Reads `SLICE` back onto the slice's four-step grid. Every cell writes the
     /// next slot and only a mark advances the cursor, so an empty cell is simply
     /// overwritten by the mark that follows it.
     const fn tracks() -> [(i32, i32); 176] {
         let mut tracks = [(0, 0); 176];
-        let (rows, cols) = (Self::WALL.len(), Self::WALL[0].len());
+        let (rows, cols) = (Self::SLICE.len(), Self::SLICE[0].len());
         let (mut n, mut k) = (0, 0);
         while k < rows * cols && n < 176 {
             let (r, x) = (k / cols, k % cols);
             tracks[n] = (x as i32 * 4 + 1, (rows - 1 - r) as i32 * 4 + 2);
-            n += (Self::WALL[r].as_bytes()[x] == b'#') as usize;
+            n += (Self::SLICE[r].as_bytes()[x] == b'#') as usize;
             k += 1;
         }
         tracks
     }
 
+    /// Sounds this slice's voices. A voice lands on the slot that hears it most
+    /// alike, and every slot holds only one voice, so a voice with no free slot
+    /// left goes silent rather than displacing one already placed.
     fn new<I: IntoIterator<Item = Note>>(notes: I) -> Self {
-        let _ = notes;
-        todo!()
+        let mut free = Vec::from(Self::SLOTS);
+        let mut slots = BTreeMap::new();
+        for note in playable(notes) {
+            let heard = (note.panning.get(), note.velocity.get());
+            let near = free.iter().enumerate();
+            let pick = near.min_by_key(|(_, (at, _))| Self::score(heard, *at));
+            let chosen = pick.map(|(i, &(_, place))| (i, place));
+            let Some((i, place)) = chosen else { continue };
+            free.swap_remove(i);
+            slots.insert(place, note.tone);
+        }
+        Self { slots }
     }
 
     /// Scores how alike two heard positions are, so a voice can be matched to the
@@ -134,12 +202,47 @@ impl Template {
 
 impl Layout for Template {
     fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
-        let note = self.slots.get(&(pos.x, pos.y)).copied();
-        let inst = self.slots.get(&(pos.x, pos.y + 1)).copied();
-        match (pos.z, note, inst) {
-            (1, _, Some(tone)) => Some(inst_block(Some(tone), air)),
-            (1, Some(tone), _) => Some(note_block(Some(tone), air)),
-            _ => todo!(),
+        let Some(local @ (local_x, local_y)) = Self::TRACKS.into_iter().find_map(|(x, y)| {
+            let (x, y) = (x - pos.x, y - pos.y);
+            ((-1..=1).contains(&x) && (0..=2).contains(&y)).then_some((x, y))
+        }) else {
+            return None;
+        };
+
+        // z = 0
+        if pos.z == 0 {
+            let repeater = || repeater("1", Facing::South, false, false);
+            let drive = (local == (0, 0)).then_some(repeater());
+            let scaffold = matches!(local, (0, 1 | 2)).then_some(barrier());
+            return drive.or(scaffold);
+        }
+        debug_assert!(pos.z == 1);
+
+        // attempt to hit
+        if let Some(tone) = self.slots.get(&(pos.x, pos.y)) {
+            return Some(note_block(Some(tone), air));
+        } else if let Some(tone) = self.slots.get(&(pos.x, pos.y + 1)) {
+            return Some(inst_block(Some(tone), air));
+        } else if self.slots.contains_key(&(pos.x, pos.y + 2)) {
+            return Some(barrier());
+        } else if local_x != 0 {
+            return None;
+        }
+        debug_assert!(local_x == 0);
+
+        // main track
+        if local_y != 0 {
+            return Some(barrier());
+        }
+        debug_assert!(local == (0, 0));
+
+        // Provide circuit support for note blocks on the sides
+        use WireConn::{None as Open, Side};
+        let west = self.slots.contains_key(&(pos.x - 1, pos.y));
+        let east = self.slots.contains_key(&(pos.x + 1, pos.y));
+        match west || east {
+            true => Some(chain_block()),
+            false => Some(wire_state(Open, Open, Side, Side, "0")),
         }
     }
 
