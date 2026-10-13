@@ -1,5 +1,5 @@
 use super::{AsLayout, EvenlyArranged, Facing, Layout, Overlaid, WireConn};
-use super::{air, chain_block, inst_block, note_block, repeater, wire_state};
+use super::{air, chain_block, include, inst_block, note_block, repeater, wire_state};
 use crate::playable;
 use mcdata::{GenericBlockState, util::BlockPos};
 use rsnbs::note::{Note, Tone};
@@ -47,7 +47,8 @@ impl TorrentLayout {
         let linkage = Linkage::new();
         let anchor = BlockPos::new(0, 0, linkage.size().z - 1);
         let slices = EvenlyArranged::new(slices, BlockPos::new(0, 0, 2));
-        let size = BlockPos::new(slices.size().x, slices.size().y, anchor.z + slices.size().z);
+        let span = include(linkage.size(), slices.size());
+        let size = BlockPos::new(span.x, span.y, anchor.z + slices.size().z);
         let layout = Overlaid::new(BlockPos::ORIGIN, linkage, anchor, slices, size);
         Self(layout)
     }
