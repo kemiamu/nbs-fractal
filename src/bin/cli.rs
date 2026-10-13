@@ -1,4 +1,5 @@
 use clap::Parser;
+use itertools::Either;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
 use nbs_fractal::schematic::WithFloor;
@@ -281,6 +282,12 @@ struct Torrent {
     /// Keep only the notes before this many ticks
     #[arg(short = 't', long)]
     ticks: Option<u32>,
+    /// Drop tracks that never sound
+    #[arg(long)]
+    omit_empty: bool,
+    /// Track centres, e.g. `--track "12,33"`; replaces the built-in set
+    #[arg(long = "track", value_name = "x,y")]
+    tracks: Vec<Track>,
 }
 
 impl Torrent {
@@ -290,10 +297,35 @@ impl Torrent {
         let notes = song
             .resolved_notes()
             .filter(|(pos, _)| pos.into_tick() < limit);
-        let layout = TorrentLayout::new(notes);
+        let tracks = match self.tracks.is_empty() {
+            true => Either::Left(TorrentLayout::DEFAULT_TRACKS.into_iter()),
+            false => Either::Right(self.tracks.iter().map(|t| (t.0, t.1))),
+        };
+        let (tracks, slices) = TorrentLayout::fill(notes, tracks, self.omit_empty);
+        let layout = TorrentLayout::new(&tracks, slices);
         let description = format!("Torrent from {}", self.input);
         let litematic = build_schematic(layout, Floor::None, description);
         write_output(&self.output, litematic);
+    }
+}
+
+/// One track centre, two whole numbers split by any non-digit, e.g. "123,323".
+#[derive(Clone, Debug)]
+struct Track(i32, i32);
+
+impl FromStr for Track {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use itertools::Itertools;
+        let parse = |t: &str| t.parse().map_err(|_| format!("invalid track: {t}"));
+        let digits = s
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|t| !t.is_empty());
+        let (x, y) = digits
+            .collect_tuple()
+            .ok_or(format!("expected two numbers: {s}"))?;
+        Ok(Track(parse(x)?, parse(y)?))
     }
 }
 
@@ -372,7 +404,7 @@ struct Match {
     /// Path to output NBS file
     #[arg(default_value = "out/generated_match.tec.nbs")]
     output: String,
-    /// Match rule offsets, slash-separated; multiple rules in order
+    /// Match rule offsets, split by any non-digit; multiple rules in order
     #[arg(short, long, num_args = 1..)]
     rules: Vec<Rule>,
 }
@@ -440,7 +472,7 @@ fn write_tec_groups(mut song: Song, tecs: Vec<BoundedTec<Tone>>, output: &str, n
     write_song(output, song);
 }
 
-/// One match rule's offsets, slash-separated, e.g. "4/8".
+/// One match rule's offsets, split by any non-digit, e.g. "4,8".
 #[derive(Clone, Debug)]
 struct Rule(Vec<Tick>);
 
@@ -449,7 +481,7 @@ impl FromStr for Rule {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parse = |t: &str| t.parse().map_err(|_| format!("invalid tick: {t}"));
-        let tokens = s.split(|c| matches!(c, '/' | ',' | ' '));
+        let tokens = s.split(|c: char| !c.is_ascii_digit());
         let offsets: Result<_, _> = tokens.filter(|t| !t.is_empty()).map(parse).collect();
         Ok(Rule(offsets?))
     }
