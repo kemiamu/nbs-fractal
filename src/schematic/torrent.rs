@@ -4,6 +4,7 @@ use crate::playable;
 use mcdata::{GenericBlockState, util::BlockPos};
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
+use rustmatica::Litematic;
 use std::collections::{BTreeMap, HashMap};
 use std::iter;
 
@@ -43,7 +44,7 @@ impl TorrentLayout {
             slices.push(Template::new(iter::empty()));
         }
 
-        let linkage = Linkage;
+        let linkage = Linkage::new();
         let anchor = BlockPos::new(0, 0, linkage.size().z - 1);
         let slices = EvenlyArranged::new(slices, BlockPos::new(0, 0, 2));
         let size = BlockPos::new(slices.size().x, slices.size().y, anchor.z + slices.size().z);
@@ -67,16 +68,27 @@ impl AsLayout for TorrentLayout {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// The fixed startup that sets every track running together.
-struct Linkage;
+/// The fixed startup that sets every track running together: the distribution
+/// network and its per-track risers, confirmed on a real build and embedded here
+/// whole as a projection, read back block by block.
+struct Linkage(Litematic<GenericBlockState>);
+
+impl Linkage {
+    /// Loads the built-in startup from the projection embedded beside this file.
+    fn new() -> Self {
+        const BYTES: &[u8] = include_bytes!("torrent_linkage.litematic");
+        let litematic = Litematic::from_bytes(BYTES).expect("built-in linkage is valid");
+        Self(litematic)
+    }
+}
 
 impl Layout for Linkage {
-    fn block_at(&self, _pos: BlockPos) -> Option<GenericBlockState> {
-        todo!()
+    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+        Some(self.0.regions[0].get_block(pos).clone())
     }
 
     fn size(&self) -> BlockPos {
-        todo!()
+        self.0.enclosing_size()
     }
 }
 
