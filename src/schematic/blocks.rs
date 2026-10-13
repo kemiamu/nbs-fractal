@@ -216,6 +216,7 @@ pub fn note_block<T: AsRef<Tone>>(
         .unwrap_or_else(fallback)
 }
 
+/// Instrument block, or fallback on None.
 pub fn inst_block<T: AsRef<Tone>>(
     note: Option<T>,
     fallback: fn() -> GenericBlockState,
@@ -224,6 +225,7 @@ pub fn inst_block<T: AsRef<Tone>>(
         .unwrap_or_else(fallback)
 }
 
+/// Base block that the circuitry is carried on.
 pub fn chain_block() -> GenericBlockState {
     GenericBlockState {
         name: "minecraft:smooth_stone".into(),
@@ -234,8 +236,11 @@ pub fn chain_block() -> GenericBlockState {
 /// Connection state of a redstone wire on one side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireConn {
+    /// No connection on this side.
     None,
+    /// Connected to a wire beside it.
     Side,
+    /// Connected to a wire above it.
     Up,
 }
 
@@ -250,6 +255,7 @@ impl WireConn {
     }
 }
 
+/// Redstone wire connected on every side, unpowered.
 pub fn redstone_wire() -> GenericBlockState {
     wire_state(
         WireConn::Side,
@@ -287,9 +293,13 @@ pub fn wire_state(
 /// Note: repeaters store the reverse of this value as their property.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Facing {
+    /// Facing east.
     East,
+    /// Facing west.
     West,
+    /// Facing north.
     North,
+    /// Facing south.
     South,
 }
 

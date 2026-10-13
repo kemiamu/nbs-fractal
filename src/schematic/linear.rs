@@ -89,11 +89,12 @@ impl AsLayout for StackedLinearLayout {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// A zigzag linear layout for one track.
+/// A foldable timeline with side branches for one track: each backbone carries
+/// one unit of branch, played evenly along time.
 pub struct LinearLayout(Clipped<EvenlyArranged<Row>>);
 
 impl LinearLayout {
-    /// Create a single-track linear layout from its notes.
+    /// Builds the foldable timeline for one track from its notes.
     pub fn new<Trk, A, T>(
         notes: Trk,
         wrap_length: Option<NonZero<usize>>,
@@ -249,9 +250,13 @@ pub(crate) struct Cell {
 /// Time scale used by linear cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScaleMode {
+    /// Four-game-tick scale.
     Scale4,
+    /// Two-game-tick scale.
     Scale2,
+    /// Three-game-tick scale.
     Scale3,
+    /// One-game-tick scale.
     Scale1,
 }
 
@@ -310,6 +315,7 @@ impl ScaleMode {
         matches!(self, Self::Scale3 | Self::Scale1)
     }
 
+    /// Maps a tick to its cell index and whether it lands on the branch line.
     pub fn cell_slot(self, tick: Tick) -> (usize, bool) {
         let tick = tick / self.scale();
         let branch = tick % 2 == 1;
