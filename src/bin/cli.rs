@@ -3,6 +3,7 @@ use itertools::Either;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
 use nbs_fractal::schematic::WithFloor;
+#[allow(deprecated)]
 use nbs_fractal::schematic::{CascadeLayout, Layout, MultiCompactLayout, MultiFishboneLayout};
 use nbs_fractal::schematic::{MultiLinearLayout, StackedLinearLayout, TappedLayout, TorrentLayout};
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
@@ -238,6 +239,8 @@ impl Fishbone {
 
 /// Layout (Cascade): Multi-track timeline with pan and volume.
 ///
+/// Deprecated in favour of the torrent layout.
+///
 /// Multiple tracks run in parallel, played evenly along time. The design can
 /// reproduce volume and panning.
 #[derive(clap::Args)]
@@ -253,6 +256,7 @@ struct Cascade {
 }
 
 impl Cascade {
+    #[allow(deprecated)]
     fn run(self) {
         let song = open_song(&self.input);
         let notes = song.resolved_notes();
@@ -285,7 +289,8 @@ struct Torrent {
     /// Drop tracks that never sound
     #[arg(long)]
     omit_empty: bool,
-    /// Track centres, e.g. `--track "12,33"`; replaces the built-in set
+    /// Track centres relative to the axis, e.g. `--track "-8,12"`; replaces the
+    /// built-in set. East is negative x and up is positive y.
     #[arg(long = "track", value_name = "x,y")]
     tracks: Vec<Track>,
 }
@@ -309,7 +314,8 @@ impl Torrent {
     }
 }
 
-/// One track centre, two whole numbers split by any non-digit, e.g. "123,323".
+/// One track centre relative to the torrent axis, two whole numbers split by any
+/// non-digit but the sign, e.g. "-8/12". East is negative x and up is positive y.
 #[derive(Clone, Debug)]
 struct Track(i32, i32);
 
@@ -318,13 +324,12 @@ impl FromStr for Track {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use itertools::Itertools;
-        let parse = |t: &str| t.parse().map_err(|_| format!("invalid track: {t}"));
-        let digits = s
-            .split(|c: char| !c.is_ascii_digit())
-            .filter(|t| !t.is_empty());
-        let (x, y) = digits
+        let parse = |t: &str| t.parse().map_err(|_| format!("invalid number: {t}"));
+        let (x, y) = s
+            .split(|c: char| !c.is_ascii_digit() && c != '-')
+            .filter(|t| !t.is_empty())
             .collect_tuple()
-            .ok_or(format!("expected two numbers: {s}"))?;
+            .ok_or(format!("expected x,y: {s}"))?;
         Ok(Track(parse(x)?, parse(y)?))
     }
 }

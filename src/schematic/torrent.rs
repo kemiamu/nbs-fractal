@@ -53,19 +53,28 @@ impl<'a> TorrentLayout<'a> {
     /// own plane.
     const AXIS: (i32, i32) = (49, 46);
 
-    /// The built-in track centres, read off `SLICE`.
+    /// Places a track's axis-relative centre back into the slice's own plane, where
+    /// east is negative x and up is positive y, so the origin maps to `AXIS`.
+    fn absolute(track: (i32, i32)) -> (i32, i32) {
+        (Self::AXIS.0 - track.0, Self::AXIS.1 + track.1)
+    }
+
+    /// The built-in track centres, read off `SLICE` and held relative to `AXIS`: east
+    /// is negative x and up is positive y, so every track sits on the four-step grid
+    /// around the origin.
     pub const DEFAULT_TRACKS: [(i32, i32); 176] = Self::tracks();
 
-    /// Reads `SLICE` back onto the slice's four-step grid. Every cell writes the next
-    /// track and only a mark advances the cursor, so an empty cell is simply
-    /// overwritten by the mark that follows it.
+    /// Reads `SLICE` back onto the slice's four-step grid, relative to `AXIS`. Every
+    /// cell writes the next track and only a mark advances the cursor, so an empty
+    /// cell is simply overwritten by the mark that follows it.
     const fn tracks() -> [(i32, i32); 176] {
         let mut tracks = [(0, 0); 176];
         let (rows, cols) = (Self::SLICE.len(), Self::SLICE[0].len());
         let (mut n, mut k) = (0, 0);
         while k < rows * cols && n < 176 {
             let (r, x) = (k / cols, k % cols);
-            tracks[n] = (x as i32 * 4 + 1, (rows - 1 - r) as i32 * 4 + 2);
+            let (tx, ty) = (x as i32 * 4 + 1, (rows - 1 - r) as i32 * 4 + 2);
+            tracks[n] = (Self::AXIS.0 - tx, ty - Self::AXIS.1);
             n += (Self::SLICE[r].as_bytes()[x] == b'#') as usize;
             k += 1;
         }
@@ -86,7 +95,8 @@ impl<'a> TorrentLayout<'a> {
     }
 
     /// Fills the effective tracks and one voice map per tick, routing every voice
-    /// to the free slot that hears it nearest. With `omit_empty`, a track that
+    /// to the free slot that hears it nearest. Tracks are axis-relative, as
+    /// `DEFAULT_TRACKS` and `--track` give them. With `omit_empty`, a track that
     /// never sounds is dropped.
     pub fn fill<Trk, A, T, Tracks>(
         notes: Trk,
@@ -99,7 +109,7 @@ impl<'a> TorrentLayout<'a> {
         T: Into<Note>,
         Tracks: IntoIterator<Item = (i32, i32)>,
     {
-        let mut tracks: Vec<(i32, i32)> = tracks.into_iter().collect();
+        let mut tracks: Vec<(i32, i32)> = tracks.into_iter().map(Self::absolute).collect();
         let slots = Self::slots(&tracks);
         let mut notes = notes
             .into_iter()
