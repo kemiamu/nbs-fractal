@@ -20,7 +20,7 @@ use std::str::FromStr;
 #[derive(Parser)]
 #[command(
     name = "nbs-fractal",
-    about = "Generate Minecraft litematic projections from NBS songs"
+    about = "Generate Minecraft projections from NBS songs"
 )]
 enum Cli {
     Compact(Compact),
@@ -68,7 +68,7 @@ struct Compact {
     /// Repeater delay coarseness 1-4 (0 = unlimited)
     #[arg(short, long, default_value_t = 0)]
     coarse: u32,
-    /// Block spacing between adjacent rows (0 = interlocked)
+    /// Block spacing between adjacent tracks (0 = interlocked)
     #[arg(short, long, default_value_t = 0)]
     gap: u32,
     /// Add a full floor platform below the build
@@ -314,7 +314,7 @@ struct Decompose {
     /// Path to output NBS file
     #[arg(default_value = "out/generated_decompose.tec.nbs")]
     output: String,
-    /// Max number of layers (TECs) to generate; 0 = no budget
+    /// Max number of layers (TECs) to generate (0 = no budget)
     #[arg(short, long, default_value_t = 2)]
     layers: usize,
 }
@@ -459,11 +459,11 @@ impl FromStr for Rule {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Layout (Tapped): Simulate TEC via tapped delay line.
+/// Layout (Tapped): Tapped delay line simulating TEC.
 ///
-/// Tapped Layout is a direct descriptive structure for the translation
-/// equivalence class design: a tapped delay line controls the repetition
-/// pattern, using Compact Layout as its playing unit.
+/// A direct descriptive structure for the translation equivalence class design:
+/// a tapped delay line controls the repetition pattern, using the Compact layout
+/// as its playing unit.
 #[derive(clap::Args)]
 struct Tapped {
     /// Path to input NBS file
@@ -474,7 +474,7 @@ struct Tapped {
     /// Max columns per row before wrapping (0 = no wrap)
     #[arg(short, long, default_value_t = 16)]
     wrap: usize,
-    /// Block spacing between adjacent rows (0 = interlocked)
+    /// Block spacing between adjacent tracks (0 = interlocked)
     #[arg(short, long, default_value_t = 0)]
     gap: u32,
     /// Add a full floor platform below the build
