@@ -46,7 +46,12 @@ fn placed(layout: &impl Layout) -> Vec<BlockPos> {
 
 #[test]
 fn louder_lands_nearer_the_axis() {
-    let layout = TorrentLayout::new([(0u32, note(0, 100)), (1, note(0, 20))]);
+    let (tracks, slices) = TorrentLayout::fill(
+        [(0u32, note(0, 100)), (1, note(0, 20))],
+        TorrentLayout::DEFAULT_TRACKS,
+        false,
+    );
+    let layout = TorrentLayout::new(&tracks, slices);
     let placed = placed(&layout);
     let distance = |p: &BlockPos| (p.x - AXIS).pow(2) + (p.y - AXIS_Y).pow(2);
     assert!(distance(&placed[0]) < distance(&placed[1]));
@@ -54,7 +59,12 @@ fn louder_lands_nearer_the_axis() {
 
 #[test]
 fn panning_spreads_across_the_axis() {
-    let layout = TorrentLayout::new([(0u32, note(-100, 100)), (1, note(100, 100))]);
+    let (tracks, slices) = TorrentLayout::fill(
+        [(0u32, note(-100, 100)), (1, note(100, 100))],
+        TorrentLayout::DEFAULT_TRACKS,
+        false,
+    );
+    let layout = TorrentLayout::new(&tracks, slices);
     let placed = placed(&layout);
     assert!(placed[0].x > AXIS);
     assert!(placed[1].x < AXIS);
@@ -105,7 +115,8 @@ fn sweep_all_panning_and_volume() {
         }
     }
 
-    let layout = TorrentLayout::new(notes);
+    let (tracks, slices) = TorrentLayout::fill(notes, TorrentLayout::DEFAULT_TRACKS, false);
+    let layout = TorrentLayout::new(&tracks, slices);
     assert_eq!(placed(&layout).len(), TICKS * voices.len());
 
     let litematic = layout.as_litematic("Torrent pan/volume audition", "nbs-fractal");
@@ -120,6 +131,7 @@ fn every_voice_is_placed() {
     let notes: Vec<(u32, Note)> = (0..24)
         .map(|i| (i, note((i as i32 * 8 - 96) as i8, (i * 4) as u8)))
         .collect();
-    let layout = TorrentLayout::new(notes);
+    let (tracks, slices) = TorrentLayout::fill(notes, TorrentLayout::DEFAULT_TRACKS, false);
+    let layout = TorrentLayout::new(&tracks, slices);
     assert_eq!(placed(&layout).len(), 24);
 }
