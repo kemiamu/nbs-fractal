@@ -14,7 +14,9 @@ use std::num::NonZero;
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Full tapped-delay-line schematic combining control and playing units.
+/// A direct descriptive structure for the translation equivalence class design:
+/// a tapped delay line controls the repetition pattern, using the Compact layout
+/// as its playing unit.
 pub struct TappedLayout {
     control: EdgeArranged<TapLine>,
     playing: Arranged<WithFloor<CompactLayout>>,
@@ -117,6 +119,8 @@ pub struct TapLine {
 }
 
 impl TapLine {
+    /// Builds a TEC's tapped delay line from its ascending offsets, each tap
+    /// driven by the gap to the previous offset; `switch` adds the closing tap.
     pub fn new<I: IntoIterator<Item = NonZero<RedStoneTick>>>(
         ticks: I,
         repeater_coarse: Option<NonZero<RedStoneTick>>,

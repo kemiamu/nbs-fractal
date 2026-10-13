@@ -13,7 +13,8 @@ use std::num::NonZero;
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// One [`CompactLayout`] line per redstone sub-track, stacked vertically.
+/// Compact variable-length packed structure: one packed line per track, stacked
+/// vertically.
 pub struct MultiCompactLayout(EvenlyArranged<WithFloor<CompactLayout>>);
 
 impl MultiCompactLayout {
@@ -48,6 +49,8 @@ impl AsLayout for MultiCompactLayout {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
+/// One track's compact line: a variable-length packed structure with no wasted
+/// gaps.
 pub struct CompactLayout(Clipped<EvenlyArranged<Row>>);
 
 impl CompactLayout {

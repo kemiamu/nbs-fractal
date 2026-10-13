@@ -1,3 +1,5 @@
+//! Torrent layout for NBS song projection.
+
 use super::{AsLayout, EvenlyArranged, Facing, Layout, Overlaid, WireConn};
 use super::{air, chain_block, include, inst_block, note_block, repeater, wire_state};
 use crate::playable;
@@ -18,11 +20,13 @@ use std::iter;
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// A note stream projected as a torrent: one slice per tick off a fixed startup.
+/// A tunnel of slices with pan and volume: whole slices laid tick by tick, read
+/// from one fixed viewpoint, so a voice lands where it is heard.
 pub struct TorrentLayout(Overlaid<Linkage, EvenlyArranged<Template>>);
 
 impl TorrentLayout {
-    /// Projects a note stream, one slice per redstone tick.
+    /// Projects a note stream into a tunnel of slices, one slice per redstone
+    /// tick.
     pub fn new<Trk, A, T>(notes: Trk) -> Self
     where
         Trk: IntoIterator<Item = (A, T)>,

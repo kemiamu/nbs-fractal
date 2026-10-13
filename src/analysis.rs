@@ -112,6 +112,7 @@ pub struct TransEqClass<E: Event> {
 }
 
 impl<E: Event> TransEqClass<E> {
+    /// Builds a TEC from its translation offsets and kernel.
     pub fn new(scatter: BTreeSet<NonZero<Tick>>, kernel: TePlane<E>) -> Self {
         Self { scatter, kernel }
     }
