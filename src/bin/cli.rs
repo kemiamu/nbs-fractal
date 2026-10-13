@@ -266,10 +266,11 @@ impl Cascade {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Layout (Torrent): Wide multi-track timeline with pan and volume.
+/// Layout (Torrent): Tunnel of slices with pan and volume.
 ///
-/// A wider wall of tracks than the cascade, still played evenly along time;
-/// the design can reproduce volume and panning.
+/// A tunnel of whole slices laid tick by tick, read from one fixed viewpoint, so
+/// a voice lands where it is heard. The design can reproduce volume and panning
+/// across a wide field.
 #[derive(clap::Args)]
 struct Torrent {
     /// Path to input NBS file
@@ -280,12 +281,18 @@ struct Torrent {
     /// Floor platform mode
     #[arg(short = 'F', long, value_enum, default_value_t)]
     floor: Floor,
+    /// Keep only the notes before this many ticks
+    #[arg(short = 't', long)]
+    ticks: Option<u32>,
 }
 
 impl Torrent {
     fn run(self) {
         let song = open_song(&self.input);
-        let notes = song.resolved_notes();
+        let limit = self.ticks.unwrap_or(u32::MAX);
+        let notes = song
+            .resolved_notes()
+            .filter(|(pos, _)| pos.into_tick() < limit);
         let layout = TorrentLayout::new(notes);
         let description = format!("Torrent from {}", self.input);
         let litematic = build_schematic(layout, self.floor, description);
