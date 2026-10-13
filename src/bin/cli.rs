@@ -278,9 +278,6 @@ struct Torrent {
     /// Path to output litematic file
     #[arg(default_value = "out/generated_torrent.litematic")]
     output: String,
-    /// Floor platform mode
-    #[arg(short = 'F', long, value_enum, default_value_t)]
-    floor: Floor,
     /// Keep only the notes before this many ticks
     #[arg(short = 't', long)]
     ticks: Option<u32>,
@@ -295,7 +292,7 @@ impl Torrent {
             .filter(|(pos, _)| pos.into_tick() < limit);
         let layout = TorrentLayout::new(notes);
         let description = format!("Torrent from {}", self.input);
-        let litematic = build_schematic(layout, self.floor, description);
+        let litematic = build_schematic(layout, Floor::None, description);
         write_output(&self.output, litematic);
     }
 }
