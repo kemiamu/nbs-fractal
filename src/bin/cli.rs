@@ -1,8 +1,9 @@
 use clap::Parser;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
+use nbs_fractal::schematic::WithFloor;
 use nbs_fractal::schematic::{CascadeLayout, Layout, MultiCompactLayout, MultiFishboneLayout};
-use nbs_fractal::schematic::{MultiLinearLayout, StackedLinearLayout, TappedLayout, WithFloor};
+use nbs_fractal::schematic::{MultiLinearLayout, StackedLinearLayout, TappedLayout, TorrentLayout};
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::{Layer, Song};
 use rsnbs::types::{Position, Tick, TimeAnchor};
@@ -26,6 +27,7 @@ enum Cli {
     Linear(Linear),
     Fishbone(Fishbone),
     Cascade(Cascade),
+    Torrent(Torrent),
     Decompose(Decompose),
     Match(Match),
     Tapped(Tapped),
@@ -37,6 +39,7 @@ fn main() {
         Cli::Linear(cmd) => cmd.run(),
         Cli::Fishbone(cmd) => cmd.run(),
         Cli::Cascade(cmd) => cmd.run(),
+        Cli::Torrent(cmd) => cmd.run(),
         Cli::Decompose(cmd) => cmd.run(),
         Cli::Match(cmd) => cmd.run(),
         Cli::Tapped(cmd) => cmd.run(),
@@ -254,6 +257,44 @@ impl Cascade {
         let notes = song.resolved_notes();
         let layout = CascadeLayout::new(notes);
         let description = format!("Cascade from {}", self.input);
+        let litematic = build_schematic(layout, self.floor, description);
+        write_output(&self.output, litematic);
+    }
+}
+
+// Torrent
+//
+// ++++++++++++============++++++++++++============++++++++++++============
+
+/// Layout (Torrent): Tunnel of slices with pan and volume.
+///
+/// A tunnel of whole slices laid tick by tick, read from one fixed viewpoint, so
+/// a voice lands where it is heard. The design can reproduce volume and panning
+/// across a wide field.
+#[derive(clap::Args)]
+struct Torrent {
+    /// Path to input NBS file
+    input: String,
+    /// Path to output litematic file
+    #[arg(default_value = "out/generated_torrent.litematic")]
+    output: String,
+    /// Floor platform mode
+    #[arg(short = 'F', long, value_enum, default_value_t)]
+    floor: Floor,
+    /// Keep only the notes before this many ticks
+    #[arg(short = 't', long)]
+    ticks: Option<u32>,
+}
+
+impl Torrent {
+    fn run(self) {
+        let song = open_song(&self.input);
+        let limit = self.ticks.unwrap_or(u32::MAX);
+        let notes = song
+            .resolved_notes()
+            .filter(|(pos, _)| pos.into_tick() < limit);
+        let layout = TorrentLayout::new(notes);
+        let description = format!("Torrent from {}", self.input);
         let litematic = build_schematic(layout, self.floor, description);
         write_output(&self.output, litematic);
     }

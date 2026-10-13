@@ -315,10 +315,10 @@ impl Facing {
     }
 }
 
-/// Repeater block with delay, facing, and powered state.
+/// Repeater block with delay, pointing direction, and powered state.
 pub fn repeater(
     delay: impl Into<Cow<'static, str>>,
-    facing: Facing,
+    toward: Facing,
     powered: bool,
     locked: bool,
 ) -> GenericBlockState {
@@ -330,7 +330,7 @@ pub fn repeater(
             ("delay".into(), delay.into()),
             // NOTE: a repeater's facing is backwards from the way it points.
             //       Mojang's mysterious code?
-            ("facing".into(), facing.invert().name().into()),
+            ("facing".into(), toward.invert().name().into()),
             ("locked".into(), locked.into()),
             ("powered".into(), powered.into()),
         ]),
