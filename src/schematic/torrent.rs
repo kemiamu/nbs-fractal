@@ -84,6 +84,7 @@ impl<'a> TorrentLayout<'a> {
     /// Builds the tunnel over filled data: the fixed startup in front, the slices
     /// stepped evenly two deep behind it.
     pub fn new(tracks: &'a [(i32, i32)], slices: Vec<BTreeMap<(i32, i32, i32), Tone>>) -> Self {
+        debug_assert!(tracks.is_sorted(), "tracks must be sorted for lookup");
         let linkage = Linkage::new();
         let anchor = BlockPos::new(0, 0, linkage.size().z - 1);
         let slices = slices.into_iter().map(|slots| Template { tracks, slots });
@@ -96,8 +97,9 @@ impl<'a> TorrentLayout<'a> {
 
     /// Fills the effective tracks and one voice map per tick, routing every voice
     /// to the free slot that hears it nearest. Tracks are axis-relative, as
-    /// `DEFAULT_TRACKS` and `--track` give them. With `omit_empty`, a track that
-    /// never sounds is dropped.
+    /// `DEFAULT_TRACKS` and `--track` give them, and come back sorted so the
+    /// layout can look them up by key. With `omit_empty`, a track that never
+    /// sounds is dropped.
     pub fn fill<Trk, A, T, Tracks>(
         notes: Trk,
         tracks: Tracks,
@@ -123,14 +125,13 @@ impl<'a> TorrentLayout<'a> {
         }
         slices.resize_with(slices.len().max(1), Default::default);
 
-        if !omit_empty {
-            return (tracks, slices);
+        if omit_empty {
+            let keys = slices.iter().flat_map(|slice| slice.keys());
+            let used: BTreeSet<(i32, i32)> = keys.map(|&(x, y, _)| (x, y)).collect();
+            tracks.retain(|track| used.contains(track));
         }
-        let used: BTreeSet<(i32, i32)> = slices
-            .iter()
-            .flat_map(|slice| slice.keys().map(|&(x, y, _)| (x, y)))
-            .collect();
-        tracks.retain(|track| used.contains(track));
+        // Slots keep their input order, but the layout looks tracks up by key.
+        tracks.sort_unstable();
         (tracks, slices)
     }
 
@@ -238,18 +239,22 @@ impl Layout for Linkage {
 /// One slice of the tunnel: the effective tracks it renders against, and the
 /// voices it carries, keyed by `(track_x, track_y, local_x)`.
 struct Template<'a> {
+    /// Track centres sorted by `(x, y)`, so `block_at` can binary-search them.
     tracks: &'a [(i32, i32)],
     slots: BTreeMap<(i32, i32, i32), Tone>,
 }
 
 impl Layout for Template<'_> {
     fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
-        let Some((tx, ty, lx, ly)) = self.tracks.iter().find_map(|&(tx, ty)| {
-            let (lx, ly) = (pos.x - tx, pos.y - ty);
-            ((-1..=1).contains(&lx) && (-2..=0).contains(&ly)).then_some((tx, ty, lx, ly))
-        }) else {
-            return None;
-        };
+        // The track holding this position, by binary search: within `±1` in x and
+        // `[-2, 0]` in y, and centres four apart, so one x column is the only one.
+        let lo = self.tracks.partition_point(|&(tx, _)| tx < pos.x - 1);
+        let hi = self.tracks.partition_point(|&(tx, _)| tx <= pos.x + 1);
+        let col = &self.tracks[lo..hi];
+        let at = col.partition_point(|&(_, ty)| ty < pos.y);
+        let near = col[at..].first().filter(|&&(_, ty)| ty <= pos.y + 2);
+        let Some(&(tx, ty)) = near else { return None };
+        let (lx, ly) = (pos.x - tx, pos.y - ty);
 
         // z = 0: the drive row, one repeater on each track's centre.
         if pos.z == 0 {
