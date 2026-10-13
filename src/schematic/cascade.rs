@@ -1,4 +1,7 @@
 //! Cascade layout for NBS song projection.
+//!
+//! Deprecated in favour of the torrent layout.
+#![allow(deprecated)]
 
 use super::{AsLayout, EvenlyArranged, Facing, Layout, Overlaid, ToneBlocks, WireConn};
 use super::{air, chain_block, inst_block, note_block, repeater, wire_state};
@@ -18,6 +21,7 @@ use std::iter;
 // ++++++++++++============++++++++++++============++++++++++++============
 
 /// A note stream projected as a cascade: one row per tick off a fixed startup.
+#[deprecated(note = "superseded by `TorrentLayout`")]
 pub struct CascadeLayout(Overlaid<Linkage, EvenlyArranged<Template>>);
 
 impl CascadeLayout {
