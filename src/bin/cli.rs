@@ -2,18 +2,16 @@ use clap::Parser;
 use itertools::Either;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
-use nbs_fractal::schematic::WithFloor;
+use nbs_fractal::schematic::linear::{MultiLinearLayout, StackedLinearLayout};
+use nbs_fractal::schematic::{Layout, WithFloor, torrent::TorrentLayout};
 #[allow(deprecated)]
-use nbs_fractal::schematic::{CascadeLayout, Layout, MultiCompactLayout, MultiFishboneLayout};
-use nbs_fractal::schematic::{MultiLinearLayout, StackedLinearLayout, TappedLayout, TorrentLayout};
+use nbs_fractal::schematic::{cascade::CascadeLayout, compact::MultiCompactLayout};
+use nbs_fractal::schematic::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::{Layer, Song};
 use rsnbs::types::{Position, Tick, TimeAnchor};
 use rustmatica::Litematic;
-use std::collections::BTreeSet;
-use std::num::NonZero;
-use std::path::Path;
-use std::str::FromStr;
+use std::{collections::BTreeSet, num::NonZero, path::Path, str::FromStr};
 
 // Cli
 //

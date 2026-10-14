@@ -5,20 +5,13 @@ use mcdata::{BlockState, GenericBlockState, util::BlockPos};
 use rustmatica::{Litematic, Region};
 use std::borrow::Cow;
 
-pub use self::blocks::*;
-pub use self::cascade::*;
-pub use self::compact::*;
-pub use self::fishbone::*;
-pub use self::linear::*;
-pub use self::tapped::*;
-pub use self::torrent::*;
-mod blocks;
-mod cascade;
-mod compact;
-mod fishbone;
-mod linear;
-mod tapped;
-mod torrent;
+pub mod blocks;
+pub mod cascade;
+pub mod compact;
+pub mod fishbone;
+pub mod linear;
+pub mod tapped;
+pub mod torrent;
 
 // Layout & AsLayout
 //

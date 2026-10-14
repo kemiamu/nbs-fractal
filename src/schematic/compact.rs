@@ -1,13 +1,10 @@
 //! Compact note block layouts for NBS song projection.
 
-use super::{
-    Arranged, AsLayout, Axis, Clipped, EvenlyArranged, Facing, Layout, Overlaid, WithFloor,
-};
-use super::{air, chain_block, inst_block, note_block, redstone_wire, repeater};
+use super::blocks::{Facing, chain_block, inst_block, note_block, redstone_wire, repeater};
+use super::{Arranged, AsLayout, Axis, Clipped, EvenlyArranged, Layout, Overlaid, WithFloor, air};
 use crate::RedStoneTick;
 use mcdata::{GenericBlockState, util::BlockPos};
-use rsnbs::note::Tone;
-use rsnbs::types::Tick;
+use rsnbs::{note::Tone, types::Tick};
 use std::iter::{self, Peekable};
 use std::num::NonZero;
 
