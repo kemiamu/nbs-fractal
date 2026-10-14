@@ -191,7 +191,8 @@ impl<L: Layout> AsLayout for EdgeArranged<L> {
 /// anchored at `i * pitch`, a monotone linear lattice of equal spacing.
 ///
 /// Query cost is O(k) with `k` the candidate window width, independent of
-/// the item count. `pitch` must be non-zero.
+/// the item count. The window is the least that still reaches every item's
+/// covering cell, so `k` is minimal. `pitch` must be non-zero.
 pub struct EvenlyArranged<L: Layout> {
     /// Sub-layouts in lattice order; item `i` sits at `i * pitch`.
     items: Vec<L>,
@@ -201,9 +202,12 @@ pub struct EvenlyArranged<L: Layout> {
     anchor: BlockPos,
     /// `pitch.dot(pitch)`, always positive.
     spacing: i32,
-    /// Lower bound of `pitch.dot(local_pos - i * pitch)` over one item box.
+    /// Least `pitch.dot(local_pos - i * pitch)` over the integer points of one
+    /// item box, so `top` never overshoots the highest covering item.
     bias: i32,
-    /// Candidate window width minus one.
+    /// Least candidate window width minus one that still reaches the highest
+    /// covering item, `floor((L - M) / spacing)` with `L = |pitch|.extent` and
+    /// `M = |pitch|.ones`.
     span: i32,
     /// Bounding box size: `pitch.abs() * (len - 1) + extent`.
     size: BlockPos,
@@ -219,9 +223,11 @@ impl<L: Layout> EvenlyArranged<L> {
             .fold(BlockPos::ORIGIN, include);
 
         let spacing = pitch.dot(pitch);
-        let peak = include(pitch, BlockPos::ORIGIN).dot(extent);
-        let bias = pitch.dot(extent) - peak;
-        let span = pitch.abs().dot(extent) / spacing;
+        let inner = include(extent - BlockPos::new(1, 1, 1), BlockPos::ORIGIN);
+        let ahead = include(pitch, BlockPos::ORIGIN).dot(inner);
+        let behind = include(-pitch, BlockPos::ORIGIN).dot(inner);
+        let bias = -behind;
+        let span = ((ahead + behind) / spacing).max(0);
         let far = items.len() as i32 - 1;
         let size = pitch.abs() * far + extent;
 
@@ -544,5 +550,108 @@ fn floor_block() -> GenericBlockState {
     GenericBlockState {
         name: "minecraft:gray_stained_glass".into(),
         properties: Default::default(),
+    }
+}
+
+// Tests
+//
+// ++++++++++++============++++++++++++============++++++++++++============
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A solid cuboid filling its whole box.
+    struct Solid(BlockPos);
+
+    impl Layout for Solid {
+        fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+            self.contains(pos).then(air)
+        }
+
+        fn size(&self) -> BlockPos {
+            self.0
+        }
+    }
+
+    fn build(sizes: &[(i32, i32, i32)], pitch: (i32, i32, i32)) -> EvenlyArranged<Solid> {
+        let items = sizes.iter().map(|&(x, y, z)| Solid(BlockPos::new(x, y, z)));
+        EvenlyArranged::new(items, BlockPos::new(pitch.0, pitch.1, pitch.2))
+    }
+
+    /// Whether any item covers `pos`, by scanning the whole lattice.
+    fn covered(arranged: &EvenlyArranged<Solid>, pos: BlockPos) -> bool {
+        let local = pos + arranged.anchor;
+        arranged.items.iter().enumerate().any(|(i, item)| {
+            item.try_get_block(local - arranged.pitch * i as i32)
+                .is_some()
+        })
+    }
+
+    /// Pitch and item sizes sweeping positive, negative, mixed and overlapping
+    /// lattices.
+    const CASES: [(&[(i32, i32, i32)], (i32, i32, i32)); 8] = [
+        (&[(5, 1, 1); 4], (2, 0, 0)),
+        (&[(5, 1, 1); 4], (-2, 0, 0)),
+        (&[(5, 5, 1); 4], (1, 1, 0)),
+        (&[(3, 3, 2); 4], (0, 0, 2)),
+        (&[(3, 3, 2); 4], (0, 0, -2)),
+        (&[(2, 6, 2); 4], (0, 4, 0)),
+        (&[(5, 1, 1), (3, 1, 1), (7, 1, 1), (2, 1, 1)], (3, 0, 0)),
+        (&[(4, 4, 3); 4], (2, 3, -1)),
+    ];
+
+    /// Every cell any item covers is found, so the window never misses.
+    #[test]
+    fn window_covers_every_item() {
+        for &(sizes, pitch) in &CASES {
+            let arranged = build(sizes, pitch);
+            let size = arranged.size();
+            for z in 0..size.z {
+                for y in 0..size.y {
+                    for x in 0..size.x {
+                        let pos = BlockPos::new(x, y, z);
+                        let hit = arranged.block_at(pos).is_some();
+                        assert_eq!(hit, covered(&arranged, pos), "{pos:?} at {pitch:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The window always reaches the highest covering item, so no scan can start
+    /// below a cell it must find.
+    #[test]
+    fn window_reaches_highest_covering_item() {
+        for &(sizes, pitch) in &CASES {
+            let arranged = build(sizes, pitch);
+            let size = arranged.size();
+            let mut needed = 0;
+            for z in 0..size.z {
+                for y in 0..size.y {
+                    for x in 0..size.x {
+                        let pos = BlockPos::new(x, y, z);
+                        let local = pos + arranged.anchor;
+                        let top = arranged.pitch.dot(local) - arranged.bias;
+                        let top = top
+                            .div_euclid(arranged.spacing)
+                            .min(arranged.items.len() as i32 - 1);
+                        let highest = (0..arranged.items.len()).rev().find(|&i| {
+                            arranged.items[i]
+                                .try_get_block(local - arranged.pitch * i as i32)
+                                .is_some()
+                        });
+                        if let Some(highest) = highest {
+                            needed = needed.max(top - highest as i32);
+                        }
+                    }
+                }
+            }
+            assert!(
+                arranged.span >= needed,
+                "{pitch:?}: {needed} > {}",
+                arranged.span
+            );
+        }
     }
 }
