@@ -216,34 +216,28 @@ pub struct EvenlyArranged<L: Layout> {
 impl<L: Layout> EvenlyArranged<L> {
     pub fn new<I: IntoIterator<Item = L>>(items: I, pitch: BlockPos) -> Self {
         assert!(pitch != BlockPos::ORIGIN, "pitch must be non-zero");
-        let items: Vec<L> = FromIterator::from_iter(items);
+        let items = Vec::from_iter(items);
         let extent = items
             .iter()
             .map(Layout::size)
             .fold(BlockPos::ORIGIN, include);
-
-        let spacing = pitch.dot(pitch);
-        let inner = include(extent - BlockPos::new(1, 1, 1), BlockPos::ORIGIN);
-        let ahead = include(pitch, BlockPos::ORIGIN).dot(inner);
-        let behind = include(-pitch, BlockPos::ORIGIN).dot(inner);
-        let bias = -behind;
-        let span = ((ahead + behind) / spacing).max(0);
         let far = items.len() as i32 - 1;
-        let size = pitch.abs() * far + extent;
 
-        let anchor = BlockPos::new(
-            pitch.x.min(0) * far,
-            pitch.y.min(0) * far,
-            pitch.z.min(0) * far,
-        );
+        let inner = include(extent - BlockPos::new(1, 1, 1), BlockPos::ORIGIN);
+        let fore = include(pitch, BlockPos::ORIGIN);
+        let back = include(-pitch, BlockPos::ORIGIN);
+        let spacing = pitch.dot(pitch);
+
+        let ahead = fore.dot(inner);
+        let behind = back.dot(inner);
         Self {
             items,
             pitch,
-            anchor,
+            anchor: -(back * far),
             spacing,
-            bias,
-            span,
-            size,
+            bias: -behind,
+            span: (ahead + behind) / spacing,
+            size: pitch.abs() * far + extent,
         }
     }
 }
@@ -252,7 +246,9 @@ impl<L: Layout> Layout for EvenlyArranged<L> {
     fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
         let local_pos = pos + self.anchor;
         let offset = self.pitch.dot(local_pos);
-        let top = ((offset - self.bias).div_euclid(self.spacing)).min(self.items.len() as i32 - 1);
+        let top = (offset - self.bias)
+            .div_euclid(self.spacing)
+            .min(self.items.len() as i32 - 1);
         let bottom = (top - self.span).max(0);
         (bottom..=top)
             .rev()
