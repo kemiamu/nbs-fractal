@@ -286,9 +286,9 @@ struct Torrent {
     /// Keep only the notes before this many ticks
     #[arg(short = 't', long)]
     ticks: Option<u32>,
-    /// Drop tracks that never sound
+    /// Load every track, even ones that never sound
     #[arg(long)]
-    omit_empty: bool,
+    all_tracks: bool,
     /// Track centres relative to the axis, e.g. `--track "-8,12"`; replaces the
     /// built-in set. East is negative x and up is positive y.
     #[arg(long = "track", value_name = "x,y")]
@@ -306,7 +306,7 @@ impl Torrent {
             true => Either::Left(TorrentLayout::DEFAULT_TRACKS.into_iter()),
             false => Either::Right(self.tracks.iter().map(|t| (t.0, t.1))),
         };
-        let (tracks, slices) = TorrentLayout::fill(notes, tracks, self.omit_empty);
+        let (tracks, slices) = TorrentLayout::fill(notes, tracks, !self.all_tracks);
         let layout = TorrentLayout::new(&tracks, slices);
         let description = format!("Torrent from {}", self.input);
         let litematic = build_schematic(layout, Floor::None, description);

@@ -185,15 +185,15 @@ impl<'a> TorrentLayout<'a> {
 
     /// Scores how alike two heard positions are, so a voice can be matched to the
     /// slot that hears it nearest: zero when they coincide and larger as they
-    /// drift apart in panning and volume. Panning weighs more than volume, though
-    /// the exact balance is not pinned down.
+    /// drift apart in panning and volume. Panning covers twice volume's range, so
+    /// the volume term is doubled, leaving panning twice as heavy overall.
     ///
     /// Panning and volume carry no settled meaning yet, so this may move onto a
     /// dedicated type once one exists; for now the pair stays a plain tuple.
     fn score(a: (i8, u8), b: (i8, u8)) -> i32 {
         let dp = i32::from(a.0) - i32::from(b.0);
         let dv = i32::from(a.1) - i32::from(b.1);
-        dp * dp + dv * dv
+        dp * dp + dv * dv * 2
     }
 }
 
