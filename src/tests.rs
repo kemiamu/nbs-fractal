@@ -6,8 +6,7 @@ use rsnbs::song::Song;
 use rsnbs::types::{LayerAnchor, Position, Tick, TimeAnchor};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::iter::repeat;
-use std::num::NonZero;
+use std::{iter::repeat, num::NonZero};
 
 //
 //
@@ -530,7 +529,7 @@ fn dump_litematic() {
 
 #[test]
 fn test_linear_layout() {
-    use crate::schematic::MultiLinearLayout;
+    use crate::schematic::linear::MultiLinearLayout;
 
     let song = Song::open_nbs("../rsnbs/fixtures/source.nbs").unwrap();
     let scale = (20.0 / song.header.tempo).round() as u32;

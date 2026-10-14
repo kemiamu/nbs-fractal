@@ -1,7 +1,7 @@
 //! Placement of panning and volume in the Torrent layout.
 
 use mcdata::util::BlockPos;
-use nbs_fractal::schematic::{Layout, TorrentLayout};
+use nbs_fractal::schematic::{Layout, torrent::TorrentLayout};
 use rsnbs::note::{Instrument, Key, Note, Tone};
 use rsnbs::types::{Panning, Volume};
 

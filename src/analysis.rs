@@ -9,11 +9,8 @@ use itertools::{Itertools, iproduct};
 use rsnbs::note::Notes;
 use rsnbs::types::{Tick, TimeAnchor};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Debug;
-use std::hash::Hash;
-use std::iter::repeat;
-use std::num::NonZero;
 use std::ops::{BitAnd, Deref, DerefMut};
+use std::{fmt::Debug, hash::Hash, iter::repeat, num::NonZero};
 
 pub mod reuse;
 

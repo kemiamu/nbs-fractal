@@ -3,13 +3,13 @@
 //! Deprecated in favour of the torrent layout.
 #![allow(deprecated)]
 
-use super::{AsLayout, EvenlyArranged, Facing, Layout, Overlaid, ToneBlocks, WireConn};
-use super::{air, chain_block, inst_block, note_block, repeater, wire_state};
+use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, inst_block};
+use super::blocks::{note_block, repeater, wire_state};
+use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air};
 use mcdata::{GenericBlockState, util::BlockPos};
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
-use std::collections::HashMap;
-use std::iter;
+use std::{collections::HashMap, iter};
 
 // Layout: CascadeLayout
 //

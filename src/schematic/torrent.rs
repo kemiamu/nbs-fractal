@@ -1,7 +1,7 @@
 //! Torrent layout for NBS song projection.
 
-use super::{AsLayout, EvenlyArranged, Facing, Layout, Overlaid, WireConn};
-use super::{air, chain_block, include, inst_block, note_block, repeater, wire_state};
+use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
+use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air, include};
 use crate::playable;
 use mcdata::{GenericBlockState, util::BlockPos};
 use rsnbs::note::{Note, Tone};

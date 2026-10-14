@@ -21,9 +21,8 @@
 
 use crate::analysis::{BoundedTec, Event, Point, TePlane, TransEqClass};
 use rsnbs::types::Tick;
-use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
-use std::num::NonZero;
+use std::{cmp::Reverse, num::NonZero};
 
 // Multiset helpers
 //
