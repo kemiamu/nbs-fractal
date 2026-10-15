@@ -7,7 +7,7 @@ use crate::BlockState;
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use rsnbs::types::{Tick, TimeAnchor};
-use std::{iter::from_fn, num::NonZero, vec::IntoIter as VecIter};
+use std::{collections::HashSet, iter::from_fn, num::NonZero, vec::IntoIter as VecIter};
 
 // Shell: MultiLinearLayout & StackedLinearLayout
 //
@@ -351,6 +351,18 @@ enum Branch {
     Piston([Option<Tone>; 2]),
 }
 
+impl Branch {
+    /// The tones this branch carries, in order.
+    fn tones(&self) -> impl Iterator<Item = &Tone> {
+        let slots: &[Option<Tone>] = match self {
+            Self::Unbranched(tone) => std::slice::from_ref(tone),
+            Self::Repeater(tones) => tones,
+            Self::Piston(tones) => tones,
+        };
+        slots.iter().flatten()
+    }
+}
+
 impl Template {
     /// Takes one cell out of the region.
     fn new(cell: &mut Cell, scale: ScaleMode, south_bound: bool) -> Self {
@@ -413,6 +425,32 @@ impl Layout for Template {
     fn size(&self) -> BlockPos {
         BlockPos::new(self.scale.width(), 2, 3)
     }
+
+    /// The blocks a cell can draw: its fixed circuit row, the branch hardware its
+    /// shape calls for, and one note and instrument block per stored tone.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        use Facing::{North, South};
+        let facing = match self.south_bound {
+            true => South,
+            false => North,
+        };
+        let scale = self.scale.scale();
+        let main = repeater(scale.to_string(), facing, false, false);
+        let mut palette = HashSet::from([chain_block(), main]);
+        if matches!(self.branch, Branch::Repeater(_)) {
+            let half = (scale / 2).to_string();
+            palette.insert(repeater(half, Facing::West, false, false));
+        }
+        if matches!(self.branch, Branch::Piston(_)) {
+            palette.insert(sticky_piston("west"));
+            palette.insert(redstone_block());
+        }
+        for tone in self.main.iter().flatten().chain(self.branch.tones()) {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
+    }
 }
 
 /// The connector turn at a row's far x-end, spanning a single z layer.
@@ -454,5 +492,19 @@ impl Layout for Turn {
 
     fn size(&self) -> BlockPos {
         BlockPos::new(self.width, 2, 1)
+    }
+
+    /// The blocks a turn can draw: its connector wires and the chain it rides on.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        if !self.connected {
+            return HashSet::new();
+        }
+        use WireConn::{None as Open, Side};
+        HashSet::from([
+            chain_block(),
+            wire_state(Side, Open, Open, Side, "0"),
+            wire_state(Side, Open, Side, Open, "0"),
+            wire_state(Side, Side, Open, Open, "0"),
+        ])
     }
 }
