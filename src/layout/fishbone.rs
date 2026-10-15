@@ -1,7 +1,7 @@
 //! Fishbone layout for NBS song projection.
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
-use super::{AsLayout, EvenlyArranged, Layout, air};
+use super::{EvenlyArranged, Layout, air, forward_layout};
 use crate::BlockState;
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
@@ -30,15 +30,11 @@ impl MultiFishboneLayout {
             .into_iter()
             .flat_map(|notes| FishboneLayout::new(notes, song_length));
         let pitch = BlockPos::new(8 + gap as i32, 0, 0);
-        Self(EvenlyArranged::new(layouts, pitch))
+        Self(EvenlyArranged::new(layouts, pitch, &()))
     }
 }
 
-impl AsLayout for MultiFishboneLayout {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
-    }
-}
+forward_layout!(MultiFishboneLayout, ());
 
 // Layout: FishboneLayout
 //
@@ -80,16 +76,12 @@ impl FishboneLayout {
 
         lanes.into_iter().map(|columns| {
             let templates = columns.into_iter().map(Template::new);
-            Self(EvenlyArranged::new(templates, BlockPos::new(0, 0, 2)))
+            Self(EvenlyArranged::new(templates, BlockPos::new(0, 0, 2), &()))
         })
     }
 }
 
-impl AsLayout for FishboneLayout {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
-    }
-}
+forward_layout!(FishboneLayout, ());
 
 // Templates: Template
 //
@@ -128,8 +120,8 @@ impl Template {
     }
 }
 
-impl Layout for Template {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl<Ctx> Layout<Ctx> for Template {
+    fn block_at(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         use Facing::{East, South};
         use WireConn::{None as Air, Side};
         let g = pos.x as usize / 2;
@@ -167,13 +159,13 @@ impl Layout for Template {
         main(pos.y).or_else(|| branch(pos.y))
     }
 
-    fn size(&self) -> BlockPos {
+    fn size(&self, _ctx: &Ctx) -> BlockPos {
         BlockPos::new(8, 2, 3)
     }
 
     /// The blocks a cell can draw: the spine and clock pass-through, one rib per
     /// group, and one note and instrument block per stored tone.
-    fn block_palette(&self) -> HashSet<BlockState> {
+    fn block_palette(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{East, South};
         use WireConn::{None as Open, Side};
         let mut palette = HashSet::from([

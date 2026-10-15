@@ -3,7 +3,7 @@ use itertools::Either;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
 use nbs_fractal::layout::linear::{MultiLinearLayout, StackedLinearLayout};
-use nbs_fractal::layout::{Layout, WithFloor, torrent::TorrentLayout};
+use nbs_fractal::layout::{AsLitematic, Layout, WithFloor, torrent::TorrentLayout};
 #[allow(deprecated)]
 use nbs_fractal::layout::{cascade::CascadeLayout, compact::MultiCompactLayout};
 use nbs_fractal::layout::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
@@ -300,8 +300,7 @@ impl Torrent {
             true => Either::Left(TorrentLayout::DEFAULT_TRACKS.into_iter()),
             false => Either::Right(self.tracks.iter().map(|t| (t.0, t.1))),
         };
-        let (tracks, slices) = TorrentLayout::fill(notes, tracks, !self.all_tracks);
-        let layout = TorrentLayout::new(&tracks, slices);
+        let layout = TorrentLayout::new(notes, tracks, !self.all_tracks);
         let description = format!("Torrent from {}", self.input);
         write_schematic(layout, Floor::None, description, &self.output);
     }

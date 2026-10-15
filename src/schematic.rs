@@ -60,8 +60,8 @@ struct Schematic<'a, L: Layout> {
 impl<'a, L: Layout> Schematic<'a, L> {
     /// Assembles the projection around a palette discovered from `layout`.
     fn new(layout: &'a L, metadata: Metadata<'a>, total_blocks: &'a Cell<i64>) -> io::Result<Self> {
-        let size = layout.size();
-        let palette = Palette::from_iter(layout.block_palette());
+        let size = layout.size(&());
+        let palette = Palette::from_iter(layout.block_palette(&()));
         let num_bits = palette.num_bits();
         let total = u64::from(size.volume()) * u64::from(num_bits);
         let num_longs =
@@ -203,7 +203,7 @@ impl<'a, L: Layout> Packed<'a, L> {
         num_bits: u32,
         total_blocks: &'a Cell<i64>,
     ) -> Self {
-        let size = layout.size();
+        let size = layout.size(&());
         Self {
             layout,
             palette,
@@ -225,7 +225,7 @@ impl<L: Layout> Iterator for Packed<'_, L> {
         while self.have < 64 && self.index < self.volume {
             let state = self
                 .layout
-                .get_block_or_air(index_to_pos(self.index, self.size));
+                .get_block_or_air(index_to_pos(self.index, self.size), &());
             let id = self.palette.id_of(&state);
             self.total_blocks
                 .set(self.total_blocks.get() + i64::from(id != 0));

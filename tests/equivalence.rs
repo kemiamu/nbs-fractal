@@ -3,7 +3,7 @@
 use itertools::iproduct;
 use mcdata::util::BlockPos;
 use nbs_fractal::BlockState;
-use nbs_fractal::layout::Layout;
+use nbs_fractal::layout::{AsLitematic, Layout};
 use nbs_fractal::schematic::Metadata;
 use rustmatica::Litematic;
 
@@ -25,8 +25,8 @@ struct Sample;
 
 const SIZE: BlockPos = BlockPos::new(4, 3, 3);
 
-impl Layout for Sample {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl Layout<()> for Sample {
+    fn block_at(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
         let harp = [("instrument", "harp"), ("note", "12"), ("powered", "false")];
         let repeater = [
             ("delay", "1"),
@@ -43,7 +43,7 @@ impl Layout for Sample {
         }
     }
 
-    fn size(&self) -> BlockPos {
+    fn size(&self, _ctx: &()) -> BlockPos {
         SIZE
     }
 }

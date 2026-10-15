@@ -1,7 +1,7 @@
 //! Torrent layout for NBS song projection.
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
-use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air, include};
+use super::{EvenlyArranged, Layout, Overlaid, air, include};
 use crate::BlockState;
 use crate::playable;
 use mcdata::util::BlockPos;
@@ -23,9 +23,13 @@ use std::iter;
 
 /// A tunnel of slices with pan and volume: whole slices laid tick by tick, read
 /// from one fixed viewpoint, so a voice lands where it is heard.
-pub struct TorrentLayout<'a>(Overlaid<Linkage, EvenlyArranged<Template<'a>>>);
+pub struct TorrentLayout {
+    /// The effective track centres every slice is read against.
+    tracks: Vec<(i32, i32)>,
+    inner: Overlaid<Linkage, EvenlyArranged<Template>>,
+}
 
-impl<'a> TorrentLayout<'a> {
+impl TorrentLayout {
     /// The slice as a picture: one row per layer from the top down, one character per
     /// grid step from the left across, `#` a track centre and `.` an empty cell. The
     /// grid spans x = 1, 5, …, 97.
@@ -82,26 +86,33 @@ impl<'a> TorrentLayout<'a> {
         tracks
     }
 
-    /// Builds the tunnel over filled data: the fixed startup in front, the slices
-    /// stepped evenly two deep behind it.
-    pub fn new(tracks: &'a [(i32, i32)], slices: Vec<BTreeMap<(i32, i32, i32), Tone>>) -> Self {
-        debug_assert!(tracks.is_sorted(), "tracks must be sorted for lookup");
+    /// Builds the tunnel from a note stream: fills every track, lays the fixed
+    /// startup in front, and steps the slices evenly two deep behind it. Tracks
+    /// are axis-relative, as `DEFAULT_TRACKS` and `--track` give them; with
+    /// `omit_empty`, a track that never sounds is dropped.
+    pub fn new<Trk, A, T, Tracks>(notes: Trk, tracks: Tracks, omit_empty: bool) -> Self
+    where
+        Trk: IntoIterator<Item = (A, T)>,
+        A: TimeAnchor,
+        T: Into<Note>,
+        Tracks: IntoIterator<Item = (i32, i32)>,
+    {
+        let (tracks, slices) = Self::fill(notes, tracks, omit_empty);
         let linkage = Linkage::new();
-        let anchor = BlockPos::new(0, 0, linkage.size().z - 1);
-        let slices = slices.into_iter().map(|slots| Template { tracks, slots });
-        let slices = EvenlyArranged::new(slices, BlockPos::new(0, 0, 2));
-        let span = include(linkage.size(), slices.size());
-        let size = BlockPos::new(span.x, span.y, anchor.z + slices.size().z);
-        let layout = Overlaid::new(BlockPos::ORIGIN, linkage, anchor, slices, size);
-        Self(layout)
+        let anchor = BlockPos::new(0, 0, linkage.size(&tracks).z - 1);
+        let slices = slices.into_iter().map(|slots| Template { slots });
+        let slices = EvenlyArranged::new(slices, BlockPos::new(0, 0, 2), &tracks);
+        let span = include(linkage.size(&tracks), slices.size(&tracks));
+        let size = BlockPos::new(span.x, span.y, anchor.z + slices.size(&tracks).z);
+        let inner = Overlaid::new(BlockPos::ORIGIN, linkage, anchor, slices, size, &tracks);
+        Self { tracks, inner }
     }
 
     /// Fills the effective tracks and one voice map per tick, routing every voice
     /// to the free slot that hears it nearest. Tracks are axis-relative, as
     /// `DEFAULT_TRACKS` and `--track` give them, and come back sorted so the
-    /// layout can look them up by key. With `omit_empty`, a track that never
-    /// sounds is dropped.
-    pub fn fill<Trk, A, T, Tracks>(
+    /// layout can look them up by key.
+    fn fill<Trk, A, T, Tracks>(
         notes: Trk,
         tracks: Tracks,
         omit_empty: bool,
@@ -198,9 +209,18 @@ impl<'a> TorrentLayout<'a> {
     }
 }
 
-impl AsLayout for TorrentLayout<'_> {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
+impl Layout<()> for TorrentLayout {
+    /// Reads the inner tunnel against the tracks this layout holds.
+    fn block_at(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
+        self.inner.block_at(pos, &self.tracks)
+    }
+
+    fn size(&self, _ctx: &()) -> BlockPos {
+        self.inner.size(&self.tracks)
+    }
+
+    fn block_palette(&self, _ctx: &()) -> HashSet<BlockState> {
+        self.inner.block_palette(&self.tracks)
     }
 }
 
@@ -227,17 +247,17 @@ impl Linkage {
     }
 }
 
-impl Layout for Linkage {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl<Ctx> Layout<Ctx> for Linkage {
+    fn block_at(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         Some(self.0.regions[0].get_block(pos).clone().into())
     }
 
-    fn size(&self) -> BlockPos {
+    fn size(&self, _ctx: &Ctx) -> BlockPos {
         self.0.enclosing_size()
     }
 
     /// The embedded projection's own palette, read straight back out.
-    fn block_palette(&self) -> HashSet<BlockState> {
+    fn block_palette(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         self.0.regions[0]
             .block_palette()
             .iter()
@@ -247,21 +267,19 @@ impl Layout for Linkage {
     }
 }
 
-/// One slice of the tunnel: the effective tracks it renders against, and the
-/// voices it carries, keyed by `(track_x, track_y, local_x)`.
-struct Template<'a> {
-    /// Track centres sorted by `(x, y)`, so `block_at` can binary-search them.
-    tracks: &'a [(i32, i32)],
+/// One slice of the tunnel: the voices it carries, keyed by
+/// `(track_x, track_y, local_x)`, read against the tracks its context holds.
+struct Template {
     slots: BTreeMap<(i32, i32, i32), Tone>,
 }
 
-impl Layout for Template<'_> {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl Layout<Vec<(i32, i32)>> for Template {
+    fn block_at(&self, pos: BlockPos, tracks: &Vec<(i32, i32)>) -> Option<BlockState> {
         // The track holding this position, by binary search: within `±1` in x and
         // `[-2, 0]` in y, and centres four apart, so one x column is the only one.
-        let lo = self.tracks.partition_point(|&(tx, _)| tx < pos.x - 1);
-        let hi = self.tracks.partition_point(|&(tx, _)| tx <= pos.x + 1);
-        let col = &self.tracks[lo..hi];
+        let lo = tracks.partition_point(|&(tx, _)| tx < pos.x - 1);
+        let hi = tracks.partition_point(|&(tx, _)| tx <= pos.x + 1);
+        let col = &tracks[lo..hi];
         let at = col.partition_point(|&(_, ty)| ty < pos.y);
         let near = col[at..].first().filter(|&&(_, ty)| ty <= pos.y + 2);
         let Some(&(tx, ty)) = near else { return None };
@@ -301,13 +319,13 @@ impl Layout for Template<'_> {
         }
     }
 
-    fn size(&self) -> BlockPos {
+    fn size(&self, _tracks: &Vec<(i32, i32)>) -> BlockPos {
         BlockPos::new(99, 71, 2)
     }
 
     /// The blocks a slice can draw: the fixed circuit row plus one note and one
     /// instrument block per stored voice.
-    fn block_palette(&self) -> HashSet<BlockState> {
+    fn block_palette(&self, _tracks: &Vec<(i32, i32)>) -> HashSet<BlockState> {
         use WireConn::{None as Open, Side};
         let mut palette = HashSet::from([
             drive_repeater(),

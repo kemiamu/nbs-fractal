@@ -4,7 +4,7 @@ use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::Song;
 use rsnbs::types::{LayerAnchor, Position, Tick, TimeAnchor};
 
-use crate::layout::Layout;
+use crate::layout::AsLitematic;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::{iter::repeat, num::NonZero};
 

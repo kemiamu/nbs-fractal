@@ -2,7 +2,7 @@
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater};
 use super::blocks::{redstone_block, sticky_piston, wire_state};
-use super::{AsLayout, Clipped, EvenlyArranged, Layout, Overlaid, WithFloor, air};
+use super::{Clipped, EvenlyArranged, Layout, Overlaid, Provided, WithFloor, air, forward_layout};
 use crate::BlockState;
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
@@ -33,15 +33,11 @@ impl MultiLinearLayout {
             LinearLayout::from_cells(cells, scale, None, 0)
         });
         let pitch = BlockPos::new(scale.width() + gap as i32, 0, 0);
-        Self(EvenlyArranged::new(layouts, pitch))
+        Self(EvenlyArranged::new(layouts, pitch, &()))
     }
 }
 
-impl AsLayout for MultiLinearLayout {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
-    }
-}
+forward_layout!(MultiLinearLayout, ());
 
 /// Multi-track linear layout stacked vertically, each with a floor platform below.
 pub struct StackedLinearLayout(EvenlyArranged<WithFloor<LinearLayout>>);
@@ -70,15 +66,11 @@ impl StackedLinearLayout {
             layer.map(|layout| WithFloor::new(layout, full))
         });
         let pitch = BlockPos::new(0, 4, 0);
-        Self(EvenlyArranged::new(layouts, pitch))
+        Self(EvenlyArranged::new(layouts, pitch, &()))
     }
 }
 
-impl AsLayout for StackedLinearLayout {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
-    }
-}
+forward_layout!(StackedLinearLayout, ());
 
 // Layout: LinearLayout & Row
 //
@@ -131,19 +123,19 @@ impl LinearLayout {
                 let region = cells.window(start, row_length);
                 Row::new(region, scale, width, index > 0, index % 2 == 0, row_length)
             });
-            Some(Self(Clipped::new(EvenlyArranged::new(rows, pitch), clip)))
+            Some(Self(Clipped::new(
+                EvenlyArranged::new(rows, pitch, &()),
+                clip,
+                &(),
+            )))
         })
     }
 }
 
-impl AsLayout for LinearLayout {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
-    }
-}
+forward_layout!(LinearLayout, ());
 
-/// One directional row of template cells.
-struct Row(Overlaid<Turn, EvenlyArranged<Template>>);
+/// One directional row of template cells, read within the [`Frame`] it holds.
+struct Row(Provided<Frame, Overlaid<Turn, EvenlyArranged<Template>>>);
 
 impl Row {
     /// Arranges its region of cells in the row direction, draining them.
@@ -157,25 +149,27 @@ impl Row {
     ) -> Self {
         let templates: Vec<Template> = cells
             .iter_mut()
-            .map(|cell| Template::new(cell, scale, south_bound))
+            .map(|cell| Template::new(cell, scale))
             .collect();
         // every row spans the full `row_length`
         let depth = 2 * row_length as i32 + 2;
         let pitch = BlockPos::new(0, 0, if south_bound { 2 } else { -2 });
-        let cells = EvenlyArranged::new(templates, pitch);
-        let turn = Turn::new(width, south_bound, leading_turn);
-        let size = BlockPos::new(width, cells.size().y, depth);
+        let frame = Frame {
+            scale,
+            width,
+            south_bound,
+        };
+        let cells = EvenlyArranged::new(templates, pitch, &frame);
+        let turn = Turn::new(leading_turn);
+        let size = BlockPos::new(width, cells.size(&frame).y, depth);
         let turn_anchor = BlockPos::new(0, 0, if south_bound { 0 } else { -1 });
         let cells_anchor = BlockPos::new(-1, 0, if south_bound { 1 } else { -2 });
-        Self(Overlaid::new(turn_anchor, turn, cells_anchor, cells, size))
+        let inner = Overlaid::new(turn_anchor, turn, cells_anchor, cells, size, &frame);
+        Self(Provided::new(frame, inner))
     }
 }
 
-impl AsLayout for Row {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
-    }
-}
+forward_layout!(Row, ());
 
 // Containers: Cells & ScaleMode
 //
@@ -329,13 +323,19 @@ impl ScaleMode {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Template cell.
+/// The row-level context every template and turn in a row is read within: the
+/// scale its cells are cut at, the width it spans, and which way it faces.
+struct Frame {
+    scale: ScaleMode,
+    width: i32,
+    south_bound: bool,
+}
+
+/// Template cell: the notes a cell carries, cut at its row's scale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Template {
     main: [Option<Tone>; 2],
     branch: Branch,
-    scale: ScaleMode,
-    south_bound: bool,
 }
 
 /// Notes carried past the two fixed main-line slots.
@@ -364,8 +364,8 @@ impl Branch {
 }
 
 impl Template {
-    /// Takes one cell out of the region.
-    fn new(cell: &mut Cell, scale: ScaleMode, south_bound: bool) -> Self {
+    /// Takes one cell out of the region, at the `scale` its row is cut at.
+    fn new(cell: &mut Cell, scale: ScaleMode) -> Self {
         let main = [cell.main.next(), cell.main.next()];
         let branch = match cell.branch.next() {
             None => Branch::Unbranched(cell.main.next()),
@@ -373,23 +373,20 @@ impl Template {
             Some(first) => Branch::Repeater([Some(first), cell.branch.next(), cell.branch.next()]),
         };
 
-        Self {
-            main,
-            branch,
-            scale,
-            south_bound,
-        }
+        Self { main, branch }
     }
 }
 
-impl Layout for Template {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl Layout<Frame> for Template {
+    fn block_at(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
         use self::{Branch::*, Facing::*};
-        let local_z = if self.south_bound { pos.z } else { 2 - pos.z };
-        let local_x = self.scale.width() - pos.x - 1;
-        let facing = if self.south_bound { South } else { North };
-        let main_repeater = || repeater(self.scale.scale().to_string(), facing, false, false);
-        let branch_repeater = || repeater((self.scale.scale() / 2).to_string(), West, false, false);
+        let south_bound = frame.south_bound;
+        let local_z = if south_bound { pos.z } else { 2 - pos.z };
+        let local_x = frame.scale.width() - pos.x - 1;
+        let facing = if south_bound { South } else { North };
+        let main_repeater = || repeater(frame.scale.scale().to_string(), facing, false, false);
+        let branch_repeater =
+            || repeater((frame.scale.scale() / 2).to_string(), West, false, false);
         match (self.branch, local_x, pos.y, local_z) {
             (_any_branch, 1, 0, 0) => Some(chain_block()),
             (_any_branch, 1, 1, 0) => Some(main_repeater()),
@@ -422,19 +419,19 @@ impl Layout for Template {
         }
     }
 
-    fn size(&self) -> BlockPos {
-        BlockPos::new(self.scale.width(), 2, 3)
+    fn size(&self, frame: &Frame) -> BlockPos {
+        BlockPos::new(frame.scale.width(), 2, 3)
     }
 
     /// The blocks a cell can draw: its fixed circuit row, the branch hardware its
     /// shape calls for, and one note and instrument block per stored tone.
-    fn block_palette(&self) -> HashSet<BlockState> {
+    fn block_palette(&self, frame: &Frame) -> HashSet<BlockState> {
         use Facing::{North, South};
-        let facing = match self.south_bound {
+        let facing = match frame.south_bound {
             true => South,
             false => North,
         };
-        let scale = self.scale.scale();
+        let scale = frame.scale.scale();
         let main = repeater(scale.to_string(), facing, false, false);
         let mut palette = HashSet::from([chain_block(), main]);
         if matches!(self.branch, Branch::Repeater(_)) {
@@ -459,29 +456,23 @@ impl Layout for Template {
 /// of the surrounding row and cell arrangement. An unconnected turn leaves its
 /// layer empty, preserving the row's fixed depth.
 struct Turn {
-    width: i32,
-    south_bound: bool,
     connected: bool,
 }
 
 impl Turn {
-    /// A turn `width` blocks wide, facing the row's travel direction.
-    fn new(width: i32, south_bound: bool, connected: bool) -> Self {
-        Self {
-            width,
-            south_bound,
-            connected,
-        }
+    /// A turn facing the row's travel direction, wired up only when connected.
+    fn new(connected: bool) -> Self {
+        Self { connected }
     }
 }
 
-impl Layout for Turn {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl Layout<Frame> for Turn {
+    fn block_at(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
         use self::WireConn::*;
         if !self.connected {
             return Option::None;
         }
-        match (pos.y, self.width - 1 - pos.x, self.south_bound) {
+        match (pos.y, frame.width - 1 - pos.x, frame.south_bound) {
             (1, 1, true) => Some(wire_state(Side, None, None, Side, "0")),
             (1, 1, false) => Some(wire_state(Side, None, Side, None, "0")),
             (1, 2.., _) => Some(wire_state(Side, Side, None, None, "0")),
@@ -490,12 +481,12 @@ impl Layout for Turn {
         }
     }
 
-    fn size(&self) -> BlockPos {
-        BlockPos::new(self.width, 2, 1)
+    fn size(&self, frame: &Frame) -> BlockPos {
+        BlockPos::new(frame.width, 2, 1)
     }
 
     /// The blocks a turn can draw: its connector wires and the chain it rides on.
-    fn block_palette(&self) -> HashSet<BlockState> {
+    fn block_palette(&self, _frame: &Frame) -> HashSet<BlockState> {
         if !self.connected {
             return HashSet::new();
         }
