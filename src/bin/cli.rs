@@ -2,16 +2,16 @@ use clap::Parser;
 use itertools::Either;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
-use nbs_fractal::schematic::linear::{MultiLinearLayout, StackedLinearLayout};
-use nbs_fractal::schematic::{Layout, WithFloor, torrent::TorrentLayout};
+use nbs_fractal::layout::linear::{MultiLinearLayout, StackedLinearLayout};
+use nbs_fractal::layout::{Layout, WithFloor, torrent::TorrentLayout};
 #[allow(deprecated)]
-use nbs_fractal::schematic::{cascade::CascadeLayout, compact::MultiCompactLayout};
-use nbs_fractal::schematic::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
+use nbs_fractal::layout::{cascade::CascadeLayout, compact::MultiCompactLayout};
+use nbs_fractal::layout::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
+use nbs_fractal::schematic::Metadata;
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::{Layer, Song};
 use rsnbs::types::{Position, Tick, TimeAnchor};
-use rustmatica::Litematic;
-use std::{collections::BTreeSet, num::NonZero, path::Path, str::FromStr};
+use std::{collections::BTreeSet, fs::File, num::NonZero, path::Path, str::FromStr};
 
 // Cli
 //
@@ -97,8 +97,7 @@ impl Compact {
         let wrap_length = NonZero::new(self.wrap);
         let layout = MultiCompactLayout::new(tracks, wrap_length, self.gap, self.full_floor);
         let description = format!("Compact from {}", self.input);
-        let litematic = build_schematic(layout, Floor::None, description);
-        write_output(&self.output, litematic);
+        write_schematic(layout, Floor::None, description, &self.output);
     }
 }
 
@@ -178,15 +177,14 @@ impl Linear {
         };
         let description = format!("Linear from {}", self.input);
 
-        let litematic = if let Some(wrap) = NonZero::new(self.wrap) {
+        if let Some(wrap) = NonZero::new(self.wrap) {
             let full = self.floor.full();
             let layout = StackedLinearLayout::new(tracks, Some(wrap), self.gap, full, song_length);
-            build_schematic(layout, Floor::None, description)
+            write_schematic(layout, Floor::None, description, &self.output);
         } else {
             let layout = MultiLinearLayout::new(tracks, self.gap, song_length);
-            build_schematic(layout, self.floor, description)
-        };
-        write_output(&self.output, litematic);
+            write_schematic(layout, self.floor, description, &self.output);
+        }
     }
 }
 
@@ -226,8 +224,7 @@ impl Fishbone {
         };
         let layout = MultiFishboneLayout::new(tracks, self.gap, song_length);
         let description = format!("Fishbone from {}", self.input);
-        let litematic = build_schematic(layout, self.floor, description);
-        write_output(&self.output, litematic);
+        write_schematic(layout, self.floor, description, &self.output);
     }
 }
 
@@ -260,8 +257,7 @@ impl Cascade {
         let notes = song.resolved_notes();
         let layout = CascadeLayout::new(notes);
         let description = format!("Cascade from {}", self.input);
-        let litematic = build_schematic(layout, self.floor, description);
-        write_output(&self.output, litematic);
+        write_schematic(layout, self.floor, description, &self.output);
     }
 }
 
@@ -307,8 +303,7 @@ impl Torrent {
         let (tracks, slices) = TorrentLayout::fill(notes, tracks, !self.all_tracks);
         let layout = TorrentLayout::new(&tracks, slices);
         let description = format!("Torrent from {}", self.input);
-        let litematic = build_schematic(layout, Floor::None, description);
-        write_output(&self.output, litematic);
+        write_schematic(layout, Floor::None, description, &self.output);
     }
 }
 
@@ -542,8 +537,7 @@ impl Tapped {
 
         let layout = TappedLayout::new(tecs, NonZero::new(self.wrap), self.gap, self.full_floor);
         let description = format!("Tapped from {}", self.input);
-        let litematic = build_schematic(layout, Floor::None, description);
-        write_output(&self.output, litematic);
+        write_schematic(layout, Floor::None, description, &self.output);
     }
 }
 
@@ -551,13 +545,24 @@ impl Tapped {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Builds the schematic, wrapping the layout in a floor platform when requested.
-fn build_schematic<L: Layout>(layout: L, floor: Floor, description: String) -> Litematic {
+/// Writes the layout as a streaming litematic projection, wrapping the layout in
+/// a floor platform when requested, and reports it.
+fn write_schematic<L: Layout>(layout: L, floor: Floor, description: String, output: &str) {
+    const NAME: &str = "Note Block Track Schematic";
     const AUTHOR: &str = "nbs-fractal";
+    let metadata = Metadata {
+        name: NAME,
+        description: &description,
+        author: AUTHOR,
+    };
+    ensure_parent(output);
+    let file = File::create(output).unwrap();
     match floor {
-        Floor::None => layout.as_litematic(description, AUTHOR),
-        _ => WithFloor::new(layout, floor.full()).as_litematic(description, AUTHOR),
+        Floor::None => layout.as_litematic(metadata, file),
+        _ => WithFloor::new(layout, floor.full()).as_litematic(metadata, file),
     }
+    .unwrap();
+    eprintln!("Wrote {output}");
 }
 
 /// Floor platform mode.
@@ -582,13 +587,6 @@ impl Floor {
 /// Loads the input song.
 fn open_song(input: &str) -> Song {
     Song::open_nbs(input).unwrap()
-}
-
-/// Ensures the parent directory exists, writes the litematic, and reports it.
-fn write_output(output: &str, litematic: Litematic) {
-    ensure_parent(output);
-    litematic.write_file(output).unwrap();
-    eprintln!("Wrote {output}");
 }
 
 /// Ensures the parent directory exists, writes the song as NBS, and reports it.

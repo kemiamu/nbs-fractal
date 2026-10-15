@@ -3,8 +3,8 @@
 use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, observer};
 use super::blocks::{redstone_torch, redstone_wire, repeater, wire_state};
 use super::{Arranged, Axis, EdgeArranged, Layout, WithFloor, compact::CompactLayout};
-use crate::{RedStoneTick, analysis::BoundedTec};
-use mcdata::{GenericBlockState, util::BlockPos};
+use crate::{BlockState, RedStoneTick, analysis::BoundedTec};
+use mcdata::util::BlockPos;
 use rsnbs::note::{Instrument, Key, Tone};
 use rsnbs::types::Tick;
 use std::num::NonZero;
@@ -85,7 +85,7 @@ impl TappedLayout {
 }
 
 impl Layout for TappedLayout {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         let divide = self.control.size().x;
         let side = pos.x < divide;
 
@@ -144,7 +144,7 @@ impl TapLine {
         }
     }
 
-    fn port(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn port(&self, pos: BlockPos) -> Option<BlockState> {
         use WireConn::*;
         let local_easting = self.size.x - pos.x - 1;
         let local_elevation = pos.y;
@@ -174,7 +174,7 @@ impl TapLine {
 }
 
 impl Layout for TapLine {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         match pos.z == 0 {
             true => self.port(pos),
             false => self.delays.try_get_block(pos - self.anchor),
@@ -213,7 +213,7 @@ impl Tap {
 }
 
 impl Layout for Tap {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         use WireConn::*;
         let rev_easting = self.size.x - pos.x - 1;
         let delay = self.delay.get();

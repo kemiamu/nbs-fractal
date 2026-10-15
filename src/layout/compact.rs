@@ -2,8 +2,8 @@
 
 use super::blocks::{Facing, chain_block, inst_block, note_block, redstone_wire, repeater};
 use super::{Arranged, AsLayout, Axis, Clipped, EvenlyArranged, Layout, Overlaid, WithFloor, air};
-use crate::RedStoneTick;
-use mcdata::{GenericBlockState, util::BlockPos};
+use crate::{BlockState, RedStoneTick};
+use mcdata::util::BlockPos;
 use rsnbs::{note::Tone, types::Tick};
 use std::iter::{self, Peekable};
 use std::num::NonZero;
@@ -343,7 +343,7 @@ impl Tile {
 }
 
 impl Layout for Tile {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         use self::{Facing::*, Tile::*};
         let south_bound = self.south_bound();
         let local_z = if south_bound { pos.z } else { 1 - pos.z };
@@ -431,7 +431,7 @@ impl Turn {
 }
 
 impl Layout for Turn {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         use self::{Facing::*, Turn::*};
         let local_x = self.width() - 1 - pos.x;
         let repeater = |delay: RedStoneTick| repeater(delay.to_string(), East, false, false);

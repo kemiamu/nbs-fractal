@@ -3,7 +3,8 @@
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater};
 use super::blocks::{redstone_block, sticky_piston, wire_state};
 use super::{AsLayout, Clipped, EvenlyArranged, Layout, Overlaid, WithFloor, air};
-use mcdata::{GenericBlockState, util::BlockPos};
+use crate::BlockState;
+use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use rsnbs::types::{Tick, TimeAnchor};
 use std::{iter::from_fn, num::NonZero, vec::IntoIter as VecIter};
@@ -370,7 +371,7 @@ impl Template {
 }
 
 impl Layout for Template {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         use self::{Branch::*, Facing::*};
         let local_z = if self.south_bound { pos.z } else { 2 - pos.z };
         let local_x = self.scale.width() - pos.x - 1;
@@ -437,7 +438,7 @@ impl Turn {
 }
 
 impl Layout for Turn {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         use self::WireConn::*;
         if !self.connected {
             return Option::None;

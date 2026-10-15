@@ -2,12 +2,13 @@
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
 use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air, include};
+use crate::BlockState;
 use crate::playable;
-use mcdata::{GenericBlockState, util::BlockPos};
+use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
 use rustmatica::Litematic;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::iter;
 
 // Layout: TorrentLayout
@@ -215,7 +216,7 @@ impl AsLayout for TorrentLayout<'_> {
 /// The fixed startup that sets every track running together: the distribution
 /// network and its per-track risers, confirmed on a real build and embedded here
 /// whole as a projection, read back block by block.
-struct Linkage(Litematic<GenericBlockState>);
+struct Linkage(Litematic<mcdata::GenericBlockState>);
 
 impl Linkage {
     /// Loads the built-in startup from the projection embedded beside this file.
@@ -227,12 +228,22 @@ impl Linkage {
 }
 
 impl Layout for Linkage {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
-        Some(self.0.regions[0].get_block(pos).clone())
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+        Some(self.0.regions[0].get_block(pos).clone().into())
     }
 
     fn size(&self) -> BlockPos {
         self.0.enclosing_size()
+    }
+
+    /// The embedded projection's own palette, read straight back out.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        self.0.regions[0]
+            .block_palette()
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect()
     }
 }
 
@@ -245,7 +256,7 @@ struct Template<'a> {
 }
 
 impl Layout for Template<'_> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         // The track holding this position, by binary search: within `±1` in x and
         // `[-2, 0]` in y, and centres four apart, so one x column is the only one.
         let lo = self.tracks.partition_point(|&(tx, _)| tx < pos.x - 1);
@@ -258,8 +269,7 @@ impl Layout for Template<'_> {
 
         // z = 0: the drive row, one repeater on each track's centre.
         if pos.z == 0 {
-            let repeater = || repeater("1", Facing::South, false, false);
-            let drive = (lx == 0 && ly == 0).then_some(repeater());
+            let drive = (lx == 0 && ly == 0).then_some(drive_repeater());
             let scaffold = (lx == 0 && ly != 0).then_some(barrier());
             return drive.or(scaffold);
         }
@@ -294,12 +304,34 @@ impl Layout for Template<'_> {
     fn size(&self) -> BlockPos {
         BlockPos::new(99, 71, 2)
     }
+
+    /// The blocks a slice can draw: the fixed circuit row plus one note and one
+    /// instrument block per stored voice.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        use WireConn::{None as Open, Side};
+        let mut palette = HashSet::from([
+            drive_repeater(),
+            barrier(),
+            chain_block(),
+            wire_state(Open, Open, Side, Side, "0"),
+        ]);
+        for tone in self.slots.values() {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
+    }
+}
+
+/// The drive repeater that sets a track's note row going.
+fn drive_repeater() -> BlockState {
+    repeater("1", Facing::South, false, false)
 }
 
 /// The barrier that scaffolds a track.
-fn barrier() -> GenericBlockState {
-    GenericBlockState {
+fn barrier() -> BlockState {
+    BlockState {
         name: "minecraft:barrier".into(),
-        properties: HashMap::from([("waterlogged".into(), "false".into())]),
+        properties: From::from([("waterlogged".into(), "false".into())]),
     }
 }

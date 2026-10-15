@@ -1,10 +1,10 @@
-use crate::schematic::Layout;
 use counter::Counter;
 use ordered_float::OrderedFloat;
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::Song;
 use rsnbs::types::{LayerAnchor, Position, Tick, TimeAnchor};
 
+use crate::layout::Layout;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::{iter::repeat, num::NonZero};
 
@@ -529,7 +529,7 @@ fn dump_litematic() {
 
 #[test]
 fn test_linear_layout() {
-    use crate::schematic::linear::MultiLinearLayout;
+    use crate::layout::linear::MultiLinearLayout;
 
     let song = Song::open_nbs("../rsnbs/fixtures/source.nbs").unwrap();
     let scale = (20.0 / song.header.tempo).round() as u32;
@@ -547,10 +547,13 @@ fn test_linear_layout() {
         .collect();
     let tracks = notes.split_by_layer_gaps();
     let layout = MultiLinearLayout::new(tracks, 0, song_length);
-    let litematic = layout.as_litematic("Linear from source.nbs", "rustnbs");
-    litematic
-        .write_file("../rsnbs/fixtures/generated_linear.litematic")
-        .unwrap();
+    let metadata = crate::schematic::Metadata {
+        name: "Note Block Track Schematic",
+        description: "Linear from source.nbs",
+        author: "rustnbs",
+    };
+    let file = std::fs::File::create("../rsnbs/fixtures/generated_linear.litematic").unwrap();
+    layout.as_litematic(metadata, file).unwrap();
 }
 
 #[test]

@@ -14,6 +14,7 @@ categories = ["games"]
 rsnbs = "0.1.7"
 clap = { version = "4.6.1", features = ["derive"] }
 counter = "0.7.1"
+flate2 = "1.1.10"
 itertools = "0.15.0"
 mcdata = "0.4.0"
 rustmatica = "0.5.2"

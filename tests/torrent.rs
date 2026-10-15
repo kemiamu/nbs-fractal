@@ -1,7 +1,7 @@
 //! Placement of panning and volume in the Torrent layout.
 
 use mcdata::util::BlockPos;
-use nbs_fractal::schematic::{Layout, torrent::TorrentLayout};
+use nbs_fractal::layout::{Layout, torrent::TorrentLayout};
 use rsnbs::note::{Instrument, Key, Note, Tone};
 use rsnbs::types::{Panning, Volume};
 
@@ -26,7 +26,7 @@ const AXIS_Y: i32 = 46;
 
 /// Every note block in `layout`, ordered by ascending z.
 fn placed(layout: &impl Layout) -> Vec<BlockPos> {
-    let size = layout.size();
+    let size = Layout::size(layout);
     let mut found = Vec::new();
     for z in 0..size.z {
         for y in 0..size.y {
@@ -119,11 +119,14 @@ fn sweep_all_panning_and_volume() {
     let layout = TorrentLayout::new(&tracks, slices);
     assert_eq!(placed(&layout).len(), TICKS * voices.len());
 
-    let litematic = layout.as_litematic("Torrent pan/volume audition", "nbs-fractal");
+    let metadata = nbs_fractal::schematic::Metadata {
+        name: "Note Block Track Schematic",
+        description: "Torrent pan/volume audition",
+        author: "nbs-fractal",
+    };
     std::fs::create_dir_all("out").ok();
-    litematic
-        .write_file("out/torrent_pan_volume.litematic")
-        .unwrap();
+    let file = std::fs::File::create("out/torrent_pan_volume.litematic").unwrap();
+    layout.as_litematic(metadata, file).unwrap();
 }
 
 #[test]

@@ -2,7 +2,8 @@
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
 use super::{AsLayout, EvenlyArranged, Layout, air};
-use mcdata::{GenericBlockState, util::BlockPos};
+use crate::BlockState;
+use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use rsnbs::types::{Tick, TimeAnchor};
 
@@ -127,7 +128,7 @@ impl Template {
 }
 
 impl Layout for Template {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         use Facing::{East, South};
         use WireConn::{None as Air, Side};
         let g = pos.x as usize / 2;
