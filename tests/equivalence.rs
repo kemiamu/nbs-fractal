@@ -1,11 +1,11 @@
 //! The streaming writer must reproduce the rustmatica reference projection.
 
 use itertools::iproduct;
-use mcdata::{BlockState, GenericBlockState, util::BlockPos};
+use mcdata::{BlockState, util::BlockPos};
+use nbs_fractal::GenericBlockState;
 use nbs_fractal::layout::Layout;
 use nbs_fractal::schematic::Metadata;
 use rustmatica::{Litematic, Region};
-use std::io::Read;
 
 const NAME: &str = "Note Block Track Schematic";
 
@@ -51,13 +51,11 @@ impl Layout for Sample {
 /// The reference bytes, built the way the old in-memory path built them.
 fn reference(layout: &Sample) -> Vec<u8> {
     let size = Layout::size(layout);
-    let mut region: Region<GenericBlockState> = Region::new(NAME, BlockPos::ORIGIN, size);
+    let mut region: Region<mcdata::GenericBlockState> = Region::new(NAME, BlockPos::ORIGIN, size);
     for (y, z, x) in iproduct!(0..size.y, 0..size.z, 0..size.x) {
         let pos = BlockPos::new(x, y, z);
-        region.set_block(
-            pos,
-            layout.block_at(pos).unwrap_or_else(GenericBlockState::air),
-        );
+        let state = layout.block_at(pos).map(Into::into);
+        region.set_block(pos, state.unwrap_or_else(mcdata::GenericBlockState::air));
     }
     let litematic: Litematic = region.as_litematic("Equivalence", "nbs-fractal");
     litematic.to_bytes().unwrap()
@@ -75,24 +73,21 @@ fn written(layout: &Sample) -> Vec<u8> {
     bytes
 }
 
-/// Decompresses and parses a projection, ignoring the creation timestamps.
-fn parsed(bytes: &[u8]) -> fastnbt::Value {
-    let mut raw = Vec::new();
-    flate2::read::GzDecoder::new(bytes)
-        .read_to_end(&mut raw)
-        .unwrap();
-    let mut value: fastnbt::Value = fastnbt::from_bytes(&raw).unwrap();
-    if let fastnbt::Value::Compound(root) = &mut value {
-        if let Some(fastnbt::Value::Compound(meta)) = root.get_mut("Metadata") {
-            meta.insert("TimeCreated".into(), fastnbt::Value::Long(0));
-            meta.insert("TimeModified".into(), fastnbt::Value::Long(0));
-        }
-    }
-    value
+/// Every cell's block, read back through rustmatica, in writing order.
+///
+/// The palette order is the writer's to choose, so the two projections are held
+/// equal on the blocks they paint rather than on their bytes.
+fn cells(bytes: &[u8]) -> Vec<mcdata::GenericBlockState> {
+    let litematic: Litematic<mcdata::GenericBlockState> = Litematic::from_bytes(bytes).unwrap();
+    let region = &litematic.regions[0];
+    let size = region.size;
+    iproduct!(0..size.y, 0..size.z, 0..size.x)
+        .map(|(y, z, x)| region.get_block(BlockPos::new(x, y, z)).clone())
+        .collect()
 }
 
 #[test]
 fn matches_reference() {
     let layout = Sample;
-    assert_eq!(parsed(&written(&layout)), parsed(&reference(&layout)));
+    assert_eq!(cells(&written(&layout)), cells(&reference(&layout)));
 }

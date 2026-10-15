@@ -1,8 +1,8 @@
 //! Block state projections for notes and instruments.
 
-use mcdata::GenericBlockState;
+use crate::GenericBlockState;
 use rsnbs::note::{ImitateInstrument, Instrument, Tone};
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::BTreeMap};
 
 /// whether this tone is renderable: built-in instrument with a minecraft note.
 fn is_valid(tone: &Tone) -> bool {
@@ -29,7 +29,7 @@ impl ToneBlocks for Tone {
     fn note_block_state(&self) -> Option<GenericBlockState> {
         let note = self.key.minecraft_note()?;
         let instr = self.instrument.note_property();
-        let properties = HashMap::from([
+        let properties = From::from([
             ("note".into(), note.to_string().into()),
             ("powered".into(), "false".into()),
             ("instrument".into(), instr.into()),
@@ -46,8 +46,8 @@ impl ToneBlocks for Tone {
         }
         let block = self.instrument.block_resource().unwrap();
         let properties = match self.instrument {
-            Instrument::Banjo => HashMap::from([("axis".into(), "y".into())]),
-            _ => HashMap::new(),
+            Instrument::Banjo => From::from([("axis".into(), "y".into())]),
+            _ => BTreeMap::new(),
         };
         Some(GenericBlockState {
             name: block.into(),
@@ -62,7 +62,7 @@ impl ToneBlocks for Tone {
         let block = self.instrument.block_resource().unwrap();
         Some(GenericBlockState {
             name: block.into(),
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
         })
     }
 }
@@ -148,7 +148,7 @@ impl InstrumentBlocks for Instrument {
         let block = self.block_resource()?;
         Some(GenericBlockState {
             name: Cow::Borrowed(block),
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
         })
     }
 
@@ -159,7 +159,7 @@ impl InstrumentBlocks for Instrument {
         let block = self.block_resource()?;
         Some(GenericBlockState {
             name: block.into(),
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
         })
     }
 }
@@ -278,7 +278,7 @@ pub fn wire_state(
 ) -> GenericBlockState {
     GenericBlockState {
         name: "minecraft:redstone_wire".into(),
-        properties: HashMap::from([
+        properties: From::from([
             ("power".into(), power.into()),
             ("north".into(), north.name().into()),
             ("south".into(), south.name().into()),
@@ -336,7 +336,7 @@ pub fn repeater(
     let locked = if locked { "true" } else { "false" };
     GenericBlockState {
         name: "minecraft:repeater".into(),
-        properties: HashMap::from([
+        properties: From::from([
             ("delay".into(), delay.into()),
             // NOTE: a repeater's facing is backwards from the way it points.
             //       Mojang's mysterious code?
@@ -351,7 +351,7 @@ pub fn repeater(
 pub fn observer(facing: impl Into<Cow<'static, str>>) -> GenericBlockState {
     GenericBlockState {
         name: "minecraft:observer".into(),
-        properties: HashMap::from([
+        properties: From::from([
             ("facing".into(), facing.into()),
             ("powered".into(), "false".into()),
         ]),
@@ -362,7 +362,7 @@ pub fn observer(facing: impl Into<Cow<'static, str>>) -> GenericBlockState {
 pub fn sticky_piston<T: Into<Cow<'static, str>>>(facing: T) -> GenericBlockState {
     GenericBlockState {
         name: "minecraft:sticky_piston".into(),
-        properties: HashMap::from([
+        properties: From::from([
             ("facing".into(), facing.into()),
             ("extended".into(), "false".into()),
         ]),

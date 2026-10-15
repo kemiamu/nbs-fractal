@@ -1,8 +1,10 @@
 //! Projection layouts: the note-to-block arrangement a song projects into.
 
+use crate::GenericBlockState;
 use crate::schematic::{self, Metadata};
 use itertools::iproduct;
-use mcdata::{BlockState, GenericBlockState, util::BlockPos};
+use mcdata::util::BlockPos;
+use std::collections::HashSet;
 use std::io::{self, Write};
 
 pub mod blocks;
@@ -44,33 +46,32 @@ pub trait Layout {
         }
     }
 
+    /// Block at the given world position, or air where the layout is empty.
+    fn get_block_or_air(&self, pos: BlockPos) -> GenericBlockState {
+        self.get_block(pos).unwrap_or_else(air)
+    }
+
     /// Whether `pos` is inside the bounding box.
     fn contains(&self, pos: BlockPos) -> bool {
         let size = self.size();
         (0..size.x).contains(&pos.x) && (0..size.y).contains(&pos.y) && (0..size.z).contains(&pos.z)
     }
 
-    /// The palette the layout draws on: every distinct block it can emit, air
-    /// first, in first-seen writing order.
+    /// The block states this instance owns: a set containing every state that
+    /// [`block_at`](Self::block_at) can return, empty cells counted as air.
     ///
-    /// A layout that already knows its palette declares it here to spare the
-    /// writer a discovery pass; the default walks [`get_block`](Self::get_block)
-    /// over the whole box and keeps the first occurrence of each block.
-    ///
-    /// **Warning:** this is expected to return a set, but returns a [`Vec`]
-    /// until upstream provides `Hash`/`Ord` for [`GenericBlockState`].
-    fn block_palette(&self) -> Vec<GenericBlockState> {
+    /// A layout may over-approximate, so declaring it spares the writer a
+    /// whole-box discovery walk; the default does exactly that walk via
+    /// [`get_block_or_air`](Self::get_block_or_air). The writer alone fixes the
+    /// id order, so the set need not be ordered.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
         let size = self.size();
-        let cell = |(y, z, x)| {
-            let block = self.get_block(BlockPos::new(x, y, z));
-            block.unwrap_or_else(GenericBlockState::air)
-        };
-        // TODO HACK: waiting on upstream support for Hash or Ord/PartialOrd
-        let mut palette = vec![GenericBlockState::air()];
-        for block in iproduct!(0..size.y, 0..size.z, 0..size.x).map(cell) {
-            if !palette.contains(&block) {
-                palette.push(block);
-            }
+        let at = |(y, z, x)| self.get_block_or_air(BlockPos::new(x, y, z));
+        // Insert one by one: `collect` would reserve the box's whole volume
+        // from the iterator's size hint, however few blocks it ends up holding.
+        let mut palette = HashSet::new();
+        for block in iproduct!(0..size.y, 0..size.z, 0..size.x).map(at) {
+            palette.insert(block);
         }
         palette
     }
@@ -103,6 +104,10 @@ impl Layout for Box<dyn Layout + '_> {
     fn size(&self) -> BlockPos {
         self.as_ref().size()
     }
+
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        self.as_ref().block_palette()
+    }
 }
 
 /// A transparent wrapper that forwards every [`Layout`] query to an inner layout.
@@ -124,7 +129,7 @@ impl<T: AsLayout> Layout for T {
         self.as_layout().size()
     }
 
-    fn block_palette(&self) -> Vec<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
         self.as_layout().block_palette()
     }
 }
@@ -178,6 +183,15 @@ impl<L: Layout> Layout for Arranged<L> {
 
     fn size(&self) -> BlockPos {
         self.size
+    }
+
+    /// The union of every band's palette.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        let mut palette = HashSet::new();
+        for (layout, _) in &self.bands {
+            palette.extend(layout.block_palette());
+        }
+        palette
     }
 }
 
@@ -274,6 +288,15 @@ impl<L: Layout> Layout for EvenlyArranged<L> {
     fn size(&self) -> BlockPos {
         self.size
     }
+
+    /// The union of every item's palette.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        let mut palette = HashSet::new();
+        for item in &self.items {
+            palette.extend(item.block_palette());
+        }
+        palette
+    }
 }
 
 // Overlaid
@@ -324,6 +347,13 @@ impl<A: Layout, B: Layout> Layout for Overlaid<A, B> {
     fn size(&self) -> BlockPos {
         self.size
     }
+
+    /// The union of both sub-layouts' palettes.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        let mut palette = self.first.1.block_palette();
+        palette.extend(self.second.1.block_palette());
+        palette
+    }
 }
 
 // Reverse
@@ -367,6 +397,11 @@ impl<L: Layout> Layout for Reverse<L> {
     fn size(&self) -> BlockPos {
         self.layout.size()
     }
+
+    /// The inner palette: mirroring moves cells, it draws no new block.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        self.layout.block_palette()
+    }
 }
 
 // WithFloor
@@ -402,6 +437,14 @@ impl<L: Layout> Layout for WithFloor<L> {
     fn size(&self) -> BlockPos {
         let size = self.layout.size();
         BlockPos::new(size.x, size.y + 1, size.z)
+    }
+
+    /// The inner palette plus the floor block, the only block this wrapper adds
+    /// on top of what the inner layout draws.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        let mut palette = self.layout.block_palette();
+        palette.insert(floor_block());
+        palette
     }
 }
 
@@ -452,6 +495,11 @@ impl<L: Layout> Layout for Clipped<L> {
 
     fn size(&self) -> BlockPos {
         self.size
+    }
+
+    /// The inner palette: clipping only drops cells, it draws no new block.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        self.layout.block_palette()
     }
 }
 
@@ -554,8 +602,8 @@ fn include(a: BlockPos, b: BlockPos) -> BlockPos {
     BlockPos::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z))
 }
 
-fn air<B: BlockState>() -> B {
-    BlockState::air()
+fn air() -> GenericBlockState {
+    GenericBlockState::air()
 }
 
 fn floor_block() -> GenericBlockState {

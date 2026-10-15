@@ -6,10 +6,11 @@
 use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, inst_block};
 use super::blocks::{note_block, repeater, wire_state};
 use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air};
-use mcdata::{GenericBlockState, util::BlockPos};
+use crate::GenericBlockState;
+use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
-use std::{collections::HashMap, iter};
+use std::iter;
 
 // Layout: CascadeLayout
 //
@@ -301,7 +302,7 @@ impl Layout for Linkage {
 
 /// The centre source button.
 fn button() -> GenericBlockState {
-    let properties = HashMap::from([
+    let properties = From::from([
         ("face".into(), "floor".into()),
         ("facing".into(), "south".into()),
         ("powered".into(), "false".into()),

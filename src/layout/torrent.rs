@@ -2,12 +2,13 @@
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
 use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air, include};
+use crate::GenericBlockState;
 use crate::playable;
-use mcdata::{GenericBlockState, util::BlockPos};
+use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
 use rustmatica::Litematic;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::iter;
 
 // Layout: TorrentLayout
@@ -215,7 +216,7 @@ impl AsLayout for TorrentLayout<'_> {
 /// The fixed startup that sets every track running together: the distribution
 /// network and its per-track risers, confirmed on a real build and embedded here
 /// whole as a projection, read back block by block.
-struct Linkage(Litematic<GenericBlockState>);
+struct Linkage(Litematic<mcdata::GenericBlockState>);
 
 impl Linkage {
     /// Loads the built-in startup from the projection embedded beside this file.
@@ -228,7 +229,7 @@ impl Linkage {
 
 impl Layout for Linkage {
     fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
-        Some(self.0.regions[0].get_block(pos).clone())
+        Some(self.0.regions[0].get_block(pos).clone().into())
     }
 
     fn size(&self) -> BlockPos {
@@ -300,6 +301,6 @@ impl Layout for Template<'_> {
 fn barrier() -> GenericBlockState {
     GenericBlockState {
         name: "minecraft:barrier".into(),
-        properties: HashMap::from([("waterlogged".into(), "false".into())]),
+        properties: From::from([("waterlogged".into(), "false".into())]),
     }
 }

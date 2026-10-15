@@ -7,10 +7,9 @@
 
 use self::encode::Encode;
 use self::nbt::{Nbt, Tag};
-use crate::layout::Layout;
+use crate::{GenericBlockState, layout::Layout};
 use flate2::{Compression, write::GzEncoder};
-use mcdata::{BlockState, GenericBlockState, util::BlockPos};
-use std::hash::{BuildHasherDefault, Hasher};
+use mcdata::util::BlockPos;
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cell::Cell, collections::HashMap};
@@ -214,10 +213,7 @@ impl<L: Layout> Iterator for Packed<'_, L> {
 
     fn next(&mut self) -> Option<i64> {
         while self.have < 64 && self.cell < self.cells {
-            let block = self
-                .layout
-                .get_block(cell_pos(self.cell, self.size))
-                .unwrap_or_else(GenericBlockState::air);
+            let block = self.layout.get_block_or_air(cell_pos(self.cell, self.size));
             let id = self.palette.id_of(&block);
             self.solid.set(self.solid.get() + i64::from(id != 0));
             self.acc |= u128::try_from(id).expect("palette id fits in u128") << self.have;
@@ -262,47 +258,38 @@ fn current_time() -> i64 {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Distinct block states in first-seen order, with a hashed lookup so a cell
-/// resolves in constant time rather than a linear scan.
+/// Distinct block states in first-seen order, with a map from state to id so a
+/// cell resolves without a scan.
 struct Palette {
     blocks: Vec<GenericBlockState>,
-    buckets: HashMap<u64, Vec<usize>, BuildHasherDefault<Identity>>,
+    ids: HashMap<GenericBlockState, usize>,
 }
 
 impl Palette {
-    /// Collects `blocks` into a palette, keeping the first occurrence of each.
+    /// Collects `blocks` into a palette ordered canonically: air first, then the
+    /// rest ascending, so the ids stay fixed whatever order the set iterates in.
     fn from_iter<I: IntoIterator<Item = GenericBlockState>>(blocks: I) -> Self {
-        let mut palette = Self {
-            blocks: Vec::new(),
-            buckets: HashMap::default(),
-        };
-        for block in blocks {
-            palette.insert(block);
-        }
-        palette
-    }
-
-    /// Adds `block` if it is new, keeping the id already assigned otherwise.
-    fn insert(&mut self, block: GenericBlockState) {
-        let hash = block_hash(&block);
-        if self.find(hash, &block).is_some() {
-            return;
-        }
-        let id = self.blocks.len();
-        self.buckets.entry(hash).or_default().push(id);
-        self.blocks.push(block);
+        let air = GenericBlockState::air();
+        let mut blocks: Vec<GenericBlockState> =
+            blocks.into_iter().filter(|block| block != &air).collect();
+        blocks.sort();
+        blocks.dedup();
+        blocks.insert(0, air);
+        let ids: HashMap<GenericBlockState, usize> = blocks
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, block)| (block, id))
+            .collect();
+        Self { blocks, ids }
     }
 
     /// The id of `block`, which this palette is contracted to contain.
     fn id_of(&self, block: &GenericBlockState) -> usize {
-        self.find(block_hash(block), block)
+        self.ids
+            .get(block)
+            .copied()
             .expect("block_palette must cover every block the region emits")
-    }
-
-    /// The id of `block` if present, looked up by its precomputed `hash`.
-    fn find(&self, hash: u64, block: &GenericBlockState) -> Option<usize> {
-        let ids = self.buckets.get(&hash)?;
-        ids.iter().copied().find(|&id| &self.blocks[id] == block)
     }
 
     /// Bits per cell: the least that still names every palette entry, at least two.
@@ -313,44 +300,6 @@ impl Palette {
         }
         bits
     }
-}
-
-/// A pass-through hasher for keys that are already one flat `u64`.
-#[derive(Default)]
-struct Identity(u64);
-
-impl Hasher for Identity {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, _bytes: &[u8]) {
-        unreachable!("only u64 keys are hashed")
-    }
-
-    fn write_u64(&mut self, value: u64) {
-        self.0 = value;
-    }
-}
-
-/// Hashes a block state with FNV-1a, combining its properties commutatively so
-/// their unordered map still hashes to one value.
-fn block_hash(block: &GenericBlockState) -> u64 {
-    const OFFSET: u64 = 0xcbf29ce484222325;
-    const PRIME: u64 = 0x100000001b3;
-    let mut hash = OFFSET;
-    for byte in block.name.as_bytes() {
-        hash = (hash ^ u64::from(*byte)).wrapping_mul(PRIME);
-    }
-    let mut properties = 0u64;
-    for (key, value) in &block.properties {
-        let mut pair = OFFSET;
-        for byte in key.as_bytes().iter().chain(value.as_bytes()) {
-            pair = (pair ^ u64::from(*byte)).wrapping_mul(PRIME);
-        }
-        properties = properties.wrapping_add(pair);
-    }
-    hash ^ properties
 }
 
 // Encode

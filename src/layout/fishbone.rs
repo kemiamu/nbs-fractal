@@ -2,7 +2,8 @@
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
 use super::{AsLayout, EvenlyArranged, Layout, air};
-use mcdata::{GenericBlockState, util::BlockPos};
+use crate::GenericBlockState;
+use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use rsnbs::types::{Tick, TimeAnchor};
 
