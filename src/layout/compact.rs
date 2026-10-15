@@ -1,7 +1,7 @@
 //! Compact note block layouts for NBS song projection.
 
 use super::blocks::{Facing, chain_block, inst_block, note_block, redstone_wire, repeater};
-use super::{Arranged, Axis, Clipped, EvenlyArranged, Layout, Overlaid, WithFloor, air};
+use super::{Arranged, Axis, Clipped, EvenlyArranged, Layout, Overlaid, Provided, WithFloor, air};
 use crate::{BlockState, RedStoneTick, forward_layout};
 use mcdata::util::BlockPos;
 use rsnbs::{note::Tone, types::Tick};
@@ -74,7 +74,15 @@ impl CompactLayout {
 
 forward_layout!(CompactLayout, ());
 
-struct Row(Overlaid<Turn, EvenlyArranged<Tile>>);
+/// The row-level context every tile and turn in a row is read within: the width
+/// it spans and which way it faces.
+struct Frame {
+    width: i32,
+    south_bound: bool,
+}
+
+/// One directional row of tiles, read within the [`Frame`] it holds.
+struct Row(Provided<Frame, Overlaid<Turn, EvenlyArranged<Tile>>>);
 
 impl Row {
     fn new<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
@@ -85,7 +93,7 @@ impl Row {
         south_bound: bool,
     ) -> Option<Self> {
         let len = wrap_length.map_or(usize::MAX, NonZero::get);
-        let mut emitter = Emitter::new(events, coarse, width, south_bound);
+        let mut emitter = Emitter::new(events, coarse);
         let turn = emitter.turn(len == 1)?;
         let tiles: Vec<Tile> = (1..len)
             .map_while(|column| emitter.tile(column + 1 == len))
@@ -93,18 +101,13 @@ impl Row {
 
         let depth = wrap_length.map_or(tiles.len() + 1, NonZero::get);
         let size = BlockPos::new(width, 3, 2 * depth as i32);
+        let frame = Frame { width, south_bound };
         let pitch = if south_bound { 2 } else { -2 };
-        let rest = EvenlyArranged::new(tiles, BlockPos::new(0, 0, pitch), &());
+        let rest = EvenlyArranged::new(tiles, BlockPos::new(0, 0, pitch), &frame);
         let turn_at = BlockPos::new(0, 0, if south_bound { 0 } else { -1 });
         let tiles_at = BlockPos::new(-1, 0, if south_bound { 1 } else { -2 });
-        Some(Self(Overlaid::new(
-            turn_at,
-            turn,
-            tiles_at,
-            rest,
-            size,
-            &(),
-        )))
+        let row = Overlaid::new(turn_at, turn, tiles_at, rest, size, &frame);
+        Some(Self(Provided::new(frame, row)))
     }
 }
 
@@ -117,19 +120,15 @@ forward_layout!(Row, ());
 struct Emitter<'a, I: Iterator> {
     events: &'a mut Events<I>,
     coarse: Tick,
-    width: i32,
-    south_bound: bool,
     terminal: bool,
     chained: bool,
 }
 
 impl<'a, I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Emitter<'a, I> {
-    fn new(events: &'a mut Events<I>, coarse: Tick, width: i32, south_bound: bool) -> Self {
+    fn new(events: &'a mut Events<I>, coarse: Tick) -> Self {
         Self {
             events,
             coarse,
-            width,
-            south_bound,
             terminal: false,
             chained: false,
         }
@@ -141,12 +140,11 @@ impl<'a, I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Emitter<'a, I> {
         let feeds = closing && (wait > stem || count > 2 || self.events.has_next_group());
         let terminal = !feeds && (wait > 0 || count <= 2);
         self.events.take_waits(stem);
-        let width = self.width;
         let turn = match (terminal, wait > stem) {
-            (true, true) => Turn::sink(width, stem, [None; 2]),
-            (true, false) => Turn::sink(width, stem, self.load(count)),
-            (false, true) => Turn::node(width, stem, None),
-            (false, false) => Turn::node(width, stem, Some(self.events.take_note())),
+            (true, true) => Turn::sink(stem, [None; 2]),
+            (true, false) => Turn::sink(stem, self.load(count)),
+            (false, true) => Turn::node(stem, None),
+            (false, false) => Turn::node(stem, Some(self.events.take_note())),
         };
         self.terminal = matches!(turn, Turn::Sink { .. });
         Some(turn)
@@ -173,9 +171,9 @@ impl<'a, I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Emitter<'a, I> {
         self.events.take_waits(stem + cap);
         let placed = bought.map_or(count, |_| 0);
         let tile = match (cap > 0, terminal) {
-            (true, _) => Tile::hold(stem, cap, self.south_bound),
-            (false, true) => Tile::sink(stem, self.load(placed), self.south_bound),
-            (false, false) => Tile::node(stem, self.load(placed), self.south_bound),
+            (true, _) => Tile::hold(stem, cap),
+            (false, true) => Tile::sink(stem, self.load(placed)),
+            (false, false) => Tile::node(stem, self.load(placed)),
         };
 
         self.terminal = matches!(tile, Tile::Sink { .. });
@@ -285,64 +283,41 @@ enum Tile {
     Hold {
         stem: RedStoneTick,
         cap: RedStoneTick,
-        south_bound: bool,
     },
     Sink {
         stem: RedStoneTick,
         cap: [Option<Tone>; 3],
-        south_bound: bool,
     },
     Node {
         stem: RedStoneTick,
         cap: [Option<Tone>; 2],
-        south_bound: bool,
     },
 }
 
 impl Tile {
-    fn south_bound(&self) -> bool {
-        match *self {
-            Tile::Hold { south_bound, .. }
-            | Tile::Sink { south_bound, .. }
-            | Tile::Node { south_bound, .. } => south_bound,
-        }
-    }
-
     fn stem(&self) -> RedStoneTick {
         match *self {
             Tile::Hold { stem, .. } | Tile::Sink { stem, .. } | Tile::Node { stem, .. } => stem,
         }
     }
 
-    fn hold(stem: RedStoneTick, cap: RedStoneTick, south_bound: bool) -> Self {
-        Self::Hold {
-            stem,
-            cap,
-            south_bound,
-        }
+    fn hold(stem: RedStoneTick, cap: RedStoneTick) -> Self {
+        Self::Hold { stem, cap }
     }
 
-    fn sink(stem: RedStoneTick, cap: [Option<Tone>; 3], south_bound: bool) -> Self {
-        Self::Sink {
-            stem,
-            cap,
-            south_bound,
-        }
+    fn sink(stem: RedStoneTick, cap: [Option<Tone>; 3]) -> Self {
+        Self::Sink { stem, cap }
     }
 
-    fn node(stem: RedStoneTick, cap: [Option<Tone>; 2], south_bound: bool) -> Self {
-        Self::Node {
-            stem,
-            cap,
-            south_bound,
-        }
+    fn node(stem: RedStoneTick, cap: [Option<Tone>; 2]) -> Self {
+        Self::Node { stem, cap }
     }
 }
 
-impl<Ctx> Layout<Ctx> for Tile {
-    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+impl Layout<Frame> for Tile {
+    fn block_at_with(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
         use self::{Facing::*, Tile::*};
-        let south_bound = self.south_bound();
+        let south_bound = frame.south_bound;
         let local_z = if south_bound { pos.z } else { 1 - pos.z };
         let facing = if south_bound { South } else { North };
         let repeater = |delay: RedStoneTick| repeater(delay.to_string(), facing, false, false);
@@ -386,15 +361,15 @@ impl<Ctx> Layout<Ctx> for Tile {
         }
     }
 
-    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _frame: &Frame) -> BlockPos {
         BlockPos::new(3, 3, 2)
     }
 
     /// The blocks a tile can draw: its stem and cap repeaters, the wire it rides
     /// on, and one note and instrument block per stored tone.
-    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, frame: &Frame) -> HashSet<BlockState> {
         use Facing::{North, South};
-        let facing = match self.south_bound() {
+        let facing = match frame.south_bound {
             true => South,
             false => North,
         };
@@ -425,43 +400,35 @@ impl<Ctx> Layout<Ctx> for Tile {
 #[derive(Clone, Copy)]
 enum Turn {
     Sink {
-        width: i32,
         stem: RedStoneTick,
         cap: [Option<Tone>; 2],
     },
     Node {
-        width: i32,
         stem: RedStoneTick,
         cap: Option<Tone>,
     },
 }
 
 impl Turn {
-    fn width(&self) -> i32 {
-        match *self {
-            Turn::Sink { width, .. } | Turn::Node { width, .. } => width,
-        }
-    }
-
     fn stem(&self) -> RedStoneTick {
         match *self {
             Turn::Sink { stem, .. } | Turn::Node { stem, .. } => stem,
         }
     }
 
-    fn sink(width: i32, stem: RedStoneTick, cap: [Option<Tone>; 2]) -> Self {
-        Self::Sink { width, stem, cap }
+    fn sink(stem: RedStoneTick, cap: [Option<Tone>; 2]) -> Self {
+        Self::Sink { stem, cap }
     }
 
-    fn node(width: i32, stem: RedStoneTick, cap: Option<Tone>) -> Self {
-        Self::Node { width, stem, cap }
+    fn node(stem: RedStoneTick, cap: Option<Tone>) -> Self {
+        Self::Node { stem, cap }
     }
 }
 
-impl<Ctx> Layout<Ctx> for Turn {
-    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+impl Layout<Frame> for Turn {
+    fn block_at_with(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
         use self::{Facing::*, Turn::*};
-        let local_x = self.width() - 1 - pos.x;
+        let local_x = frame.width - 1 - pos.x;
         let repeater = |delay: RedStoneTick| repeater(delay.to_string(), East, false, false);
 
         let stem = || match (local_x, pos.y) {
@@ -492,13 +459,13 @@ impl<Ctx> Layout<Ctx> for Turn {
         }
     }
 
-    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
-        BlockPos::new(self.width(), 3, 1)
+    fn size_with(&self, frame: &Frame) -> BlockPos {
+        BlockPos::new(frame.width, 3, 1)
     }
 
     /// The blocks a turn can draw: its stem repeater, the wire it rides on, and
     /// one note and instrument block per stored tone.
-    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _frame: &Frame) -> HashSet<BlockState> {
         let mut palette = HashSet::from([chain_block(), redstone_wire()]);
         if self.stem() > 0 {
             let delay = self.stem().to_string();
