@@ -5,6 +5,8 @@
 //! projection. The schema is a tree of types that write themselves, so the
 //! writer learns nothing of a caller beyond its bounding box and its palette.
 
+use self::encode::Encode;
+use self::nbt::{Nbt, Tag};
 use flate2::{Compression, write::GzEncoder};
 use itertools::iproduct;
 use mcdata::{BlockState, GenericBlockState, util::BlockPos};
@@ -58,95 +60,6 @@ pub struct Metadata<'a> {
     pub description: &'a str,
     /// Author credited in the header.
     pub author: &'a str,
-}
-
-// Encode
-//
-// ++++++++++++============++++++++++++============++++++++++++============
-
-/// A value that writes itself as NBT under a given name.
-trait Encode {
-    /// The tag this value is written as.
-    const TAG: Tag;
-
-    /// Writes this tag's payload, without a tag id or a name.
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()>;
-
-    /// Writes this value as the named tag `name`.
-    fn encode<W: Write>(&self, name: &str, out: &mut Nbt<W>) -> io::Result<()> {
-        out.tag(Self::TAG, name)?;
-        self.body(out)
-    }
-}
-
-impl Encode for i32 {
-    const TAG: Tag = Tag::Int;
-
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        out.int(*self)
-    }
-}
-
-impl Encode for i64 {
-    const TAG: Tag = Tag::Long;
-
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        out.long(*self)
-    }
-}
-
-impl Encode for str {
-    const TAG: Tag = Tag::String;
-
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        out.string(self)
-    }
-}
-
-impl Encode for String {
-    const TAG: Tag = Tag::String;
-
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        out.string(self)
-    }
-}
-
-impl Encode for BlockPos {
-    const TAG: Tag = Tag::Compound;
-
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        self.x.encode("x", out)?;
-        self.y.encode("y", out)?;
-        self.z.encode("z", out)?;
-        out.end()
-    }
-}
-
-impl Encode for GenericBlockState {
-    const TAG: Tag = Tag::Compound;
-
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        self.name.as_ref().encode("Name", out)?;
-        out.tag(Tag::Compound, "Properties")?;
-        for (key, value) in &self.properties {
-            value.encode(key, out)?;
-        }
-        out.end()?; // Properties
-        out.end() // block state
-    }
-}
-
-impl<T: Encode> Encode for Vec<T> {
-    const TAG: Tag = Tag::List;
-
-    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        let len = i32::try_from(self.len()).map_err(|_| out_of_range("list length"))?;
-        out.list(T::TAG, len)?;
-        for item in self {
-            item.body(out)?;
-        }
-        Ok(())
-    }
 }
 
 // litematic
@@ -465,97 +378,200 @@ fn block_hash(block: &GenericBlockState) -> u64 {
     hash ^ properties
 }
 
+// Encode
+//
+// ++++++++++++============++++++++++++============++++++++++++============
+
+mod encode {
+    use super::{BlockPos, GenericBlockState, Nbt, Tag, out_of_range};
+    use std::io::{self, Write};
+
+    /// A value that writes itself as NBT under a given name.
+    pub(super) trait Encode {
+        /// The tag this value is written as.
+        const TAG: Tag;
+
+        /// Writes this tag's payload, without a tag id or a name.
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()>;
+
+        /// Writes this value as the named tag `name`.
+        fn encode<W: Write>(&self, name: &str, out: &mut Nbt<W>) -> io::Result<()> {
+            out.tag(Self::TAG, name)?;
+            self.body(out)
+        }
+    }
+
+    impl Encode for i32 {
+        const TAG: Tag = Tag::Int;
+
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+            out.int(*self)
+        }
+    }
+
+    impl Encode for i64 {
+        const TAG: Tag = Tag::Long;
+
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+            out.long(*self)
+        }
+    }
+
+    impl Encode for str {
+        const TAG: Tag = Tag::String;
+
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+            out.string(self)
+        }
+    }
+
+    impl Encode for String {
+        const TAG: Tag = Tag::String;
+
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+            out.string(self)
+        }
+    }
+
+    impl Encode for BlockPos {
+        const TAG: Tag = Tag::Compound;
+
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+            self.x.encode("x", out)?;
+            self.y.encode("y", out)?;
+            self.z.encode("z", out)?;
+            out.end()
+        }
+    }
+
+    impl Encode for GenericBlockState {
+        const TAG: Tag = Tag::Compound;
+
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+            self.name.as_ref().encode("Name", out)?;
+            out.tag(Tag::Compound, "Properties")?;
+            for (key, value) in &self.properties {
+                value.encode(key, out)?;
+            }
+            out.end()?; // Properties
+            out.end() // block state
+        }
+    }
+
+    impl<T: Encode> Encode for Vec<T> {
+        const TAG: Tag = Tag::List;
+
+        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+            let len = i32::try_from(self.len()).map_err(|_| out_of_range("list length"))?;
+            out.list(T::TAG, len)?;
+            for item in self {
+                item.body(out)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 // NBT
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// The NBT tag ids the writer emits.
-#[repr(u8)]
-#[derive(Clone, Copy)]
-enum Tag {
-    End = 0,
-    Int = 3,
-    Long = 4,
-    String = 8,
-    List = 9,
-    Compound = 10,
-    LongArray = 12,
-}
+mod nbt {
+    use super::out_of_range;
+    use std::io::{self, Write};
 
-/// Writes NBT bytes forward into any sink.
-///
-/// Every tag goes straight to the sink as it is produced, so a projection can
-/// be streamed: a `TAG_Long_Array` is pulled one word at a time instead of being
-/// built whole.
-struct Nbt<W> {
-    out: W,
-}
-
-impl<W: Write> Nbt<W> {
-    /// Wraps `out` as an NBT sink.
-    fn new(out: W) -> Self {
-        Self { out }
+    /// The NBT tag ids the writer emits.
+    #[repr(u8)]
+    #[derive(Clone, Copy)]
+    pub(super) enum Tag {
+        End = 0,
+        Int = 3,
+        Long = 4,
+        String = 8,
+        List = 9,
+        Compound = 10,
+        LongArray = 12,
     }
 
-    /// Returns the sink once the projection is written.
-    fn into_inner(self) -> W {
-        self.out
+    /// Writes NBT bytes forward into any sink.
+    ///
+    /// Every tag goes straight to the sink as it is produced, so a projection can
+    /// be streamed: a `TAG_Long_Array` is pulled one word at a time instead of being
+    /// built whole.
+    pub(super) struct Nbt<W> {
+        out: W,
     }
 
-    /// Opens the unnamed root compound.
-    fn root(&mut self) -> io::Result<()> {
-        self.out.write_all(&[Tag::Compound as u8, 0, 0])
-    }
-
-    /// Writes a tag id and a length-prefixed name.
-    fn tag(&mut self, tag: Tag, name: &str) -> io::Result<()> {
-        let len = u16::try_from(name.len()).map_err(|_| out_of_range("tag name"))?;
-        self.out.write_all(&[tag as u8])?;
-        self.out.write_all(&len.to_be_bytes())?;
-        self.out.write_all(name.as_bytes())
-    }
-
-    /// Closes the compound that is open.
-    fn end(&mut self) -> io::Result<()> {
-        self.out.write_all(&[Tag::End as u8])
-    }
-
-    /// Writes an `i32` payload.
-    fn int(&mut self, value: i32) -> io::Result<()> {
-        self.out.write_all(&value.to_be_bytes())
-    }
-
-    /// Writes an `i64` payload.
-    fn long(&mut self, value: i64) -> io::Result<()> {
-        self.out.write_all(&value.to_be_bytes())
-    }
-
-    /// Writes a length-prefixed UTF-8 payload.
-    fn string(&mut self, value: &str) -> io::Result<()> {
-        let len = u16::try_from(value.len()).map_err(|_| out_of_range("string"))?;
-        self.out.write_all(&len.to_be_bytes())?;
-        self.out.write_all(value.as_bytes())
-    }
-
-    /// Writes a list payload header: its element tag and element count.
-    fn list(&mut self, element: Tag, len: i32) -> io::Result<()> {
-        self.out.write_all(&[element as u8])?;
-        self.out.write_all(&len.to_be_bytes())
-    }
-
-    /// Writes an empty named list.
-    fn empty_list(&mut self, name: &str) -> io::Result<()> {
-        self.tag(Tag::List, name)?;
-        self.list(Tag::End, 0)
-    }
-
-    /// Writes a `TAG_Long_Array` payload, word by word, so it is never held whole.
-    fn long_array<I: Iterator<Item = i64>>(&mut self, len: i32, words: I) -> io::Result<()> {
-        self.out.write_all(&len.to_be_bytes())?;
-        for word in words {
-            self.out.write_all(&word.to_be_bytes())?;
+    impl<W: Write> Nbt<W> {
+        /// Wraps `out` as an NBT sink.
+        pub(super) fn new(out: W) -> Self {
+            Self { out }
         }
-        Ok(())
+
+        /// Returns the sink once the projection is written.
+        pub(super) fn into_inner(self) -> W {
+            self.out
+        }
+
+        /// Opens the unnamed root compound.
+        pub(super) fn root(&mut self) -> io::Result<()> {
+            self.out.write_all(&[Tag::Compound as u8, 0, 0])
+        }
+
+        /// Writes a tag id and a length-prefixed name.
+        pub(super) fn tag(&mut self, tag: Tag, name: &str) -> io::Result<()> {
+            let len = u16::try_from(name.len()).map_err(|_| out_of_range("tag name"))?;
+            self.out.write_all(&[tag as u8])?;
+            self.out.write_all(&len.to_be_bytes())?;
+            self.out.write_all(name.as_bytes())
+        }
+
+        /// Closes the compound that is open.
+        pub(super) fn end(&mut self) -> io::Result<()> {
+            self.out.write_all(&[Tag::End as u8])
+        }
+
+        /// Writes an `i32` payload.
+        pub(super) fn int(&mut self, value: i32) -> io::Result<()> {
+            self.out.write_all(&value.to_be_bytes())
+        }
+
+        /// Writes an `i64` payload.
+        pub(super) fn long(&mut self, value: i64) -> io::Result<()> {
+            self.out.write_all(&value.to_be_bytes())
+        }
+
+        /// Writes a length-prefixed UTF-8 payload.
+        pub(super) fn string(&mut self, value: &str) -> io::Result<()> {
+            let len = u16::try_from(value.len()).map_err(|_| out_of_range("string"))?;
+            self.out.write_all(&len.to_be_bytes())?;
+            self.out.write_all(value.as_bytes())
+        }
+
+        /// Writes a list payload header: its element tag and element count.
+        pub(super) fn list(&mut self, element: Tag, len: i32) -> io::Result<()> {
+            self.out.write_all(&[element as u8])?;
+            self.out.write_all(&len.to_be_bytes())
+        }
+
+        /// Writes an empty named list.
+        pub(super) fn empty_list(&mut self, name: &str) -> io::Result<()> {
+            self.tag(Tag::List, name)?;
+            self.list(Tag::End, 0)
+        }
+
+        /// Writes a `TAG_Long_Array` payload, word by word, so it is never held whole.
+        pub(super) fn long_array<I: Iterator<Item = i64>>(
+            &mut self,
+            len: i32,
+            words: I,
+        ) -> io::Result<()> {
+            self.out.write_all(&len.to_be_bytes())?;
+            for word in words {
+                self.out.write_all(&word.to_be_bytes())?;
+            }
+            Ok(())
+        }
     }
 }
 
