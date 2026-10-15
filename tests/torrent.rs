@@ -1,7 +1,7 @@
 //! Placement of panning and volume in the Torrent layout.
 
 use mcdata::util::BlockPos;
-use nbs_fractal::layout::{Layout, torrent::TorrentLayout};
+use nbs_fractal::layout::{LayoutExt, torrent::TorrentLayout};
 use rsnbs::note::{Instrument, Key, Note, Tone};
 use rsnbs::types::{Panning, Volume};
 
@@ -25,15 +25,15 @@ const AXIS: i32 = 49;
 const AXIS_Y: i32 = 46;
 
 /// Every note block in `layout`, ordered by ascending z.
-fn placed(layout: &impl Layout) -> Vec<BlockPos> {
-    let size = Layout::size(layout);
+fn placed(layout: &impl LayoutExt) -> Vec<BlockPos> {
+    let size = layout.size();
     let mut found = Vec::new();
     for z in 0..size.z {
         for y in 0..size.y {
             for x in 0..size.x {
                 let pos = BlockPos::new(x, y, z);
                 let hit = layout
-                    .block_at(pos)
+                    .get_block(pos)
                     .is_some_and(|b| b.name == "minecraft:note_block");
                 if hit {
                     found.push(pos);
@@ -46,12 +46,11 @@ fn placed(layout: &impl Layout) -> Vec<BlockPos> {
 
 #[test]
 fn louder_lands_nearer_the_axis() {
-    let (tracks, slices) = TorrentLayout::fill(
+    let layout = TorrentLayout::new(
         [(0u32, note(0, 100)), (1, note(0, 20))],
         TorrentLayout::DEFAULT_TRACKS,
         false,
     );
-    let layout = TorrentLayout::new(&tracks, slices);
     let placed = placed(&layout);
     let distance = |p: &BlockPos| (p.x - AXIS).pow(2) + (p.y - AXIS_Y).pow(2);
     assert!(distance(&placed[0]) < distance(&placed[1]));
@@ -59,12 +58,11 @@ fn louder_lands_nearer_the_axis() {
 
 #[test]
 fn panning_spreads_across_the_axis() {
-    let (tracks, slices) = TorrentLayout::fill(
+    let layout = TorrentLayout::new(
         [(0u32, note(-100, 100)), (1, note(100, 100))],
         TorrentLayout::DEFAULT_TRACKS,
         false,
     );
-    let layout = TorrentLayout::new(&tracks, slices);
     let placed = placed(&layout);
     assert!(placed[0].x > AXIS);
     assert!(placed[1].x < AXIS);
@@ -115,8 +113,7 @@ fn sweep_all_panning_and_volume() {
         }
     }
 
-    let (tracks, slices) = TorrentLayout::fill(notes, TorrentLayout::DEFAULT_TRACKS, false);
-    let layout = TorrentLayout::new(&tracks, slices);
+    let layout = TorrentLayout::new(notes, TorrentLayout::DEFAULT_TRACKS, false);
     assert_eq!(placed(&layout).len(), TICKS * voices.len());
 
     let metadata = nbs_fractal::schematic::Metadata {
@@ -134,7 +131,6 @@ fn every_voice_is_placed() {
     let notes: Vec<(u32, Note)> = (0..24)
         .map(|i| (i, note((i as i32 * 8 - 96) as i8, (i * 4) as u8)))
         .collect();
-    let (tracks, slices) = TorrentLayout::fill(notes, TorrentLayout::DEFAULT_TRACKS, false);
-    let layout = TorrentLayout::new(&tracks, slices);
+    let layout = TorrentLayout::new(notes, TorrentLayout::DEFAULT_TRACKS, false);
     assert_eq!(placed(&layout).len(), 24);
 }

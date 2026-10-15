@@ -7,7 +7,8 @@
 
 use self::encode::Encode;
 use self::nbt::{Nbt, Tag};
-use crate::{BlockState, layout::Layout};
+use crate::BlockState;
+use crate::layout::{Layout, LayoutExt};
 use flate2::{Compression, write::GzEncoder};
 use mcdata::util::BlockPos;
 use std::cell::Cell;

@@ -5,8 +5,8 @@
 
 use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, inst_block};
 use super::blocks::{note_block, repeater, wire_state};
-use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air};
-use crate::BlockState;
+use super::{EvenlyArranged, Layout, LayoutExt, Overlaid, air};
+use crate::{BlockState, forward_layout};
 use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
@@ -51,17 +51,14 @@ impl CascadeLayout {
 
         let linkage = Linkage;
         let anchor = BlockPos::new(0, 0, linkage.size().z - 1);
-        let rows = EvenlyArranged::new(rows, BlockPos::new(0, 0, 2));
+        let rows = EvenlyArranged::new(rows, BlockPos::new(0, 0, 2), &());
         let size = BlockPos::new(rows.size().x, rows.size().y, anchor.z + rows.size().z);
-        Self(Overlaid::new(BlockPos::ORIGIN, linkage, anchor, rows, size))
+        let overlay = Overlaid::new(BlockPos::ORIGIN, linkage, anchor, rows, size, &());
+        Self(overlay)
     }
 }
 
-impl AsLayout for CascadeLayout {
-    fn as_layout(&self) -> &impl Layout {
-        &self.0
-    }
-}
+forward_layout!(CascadeLayout, ());
 
 // Templates: Template & Linkage
 //
@@ -239,8 +236,8 @@ impl Template {
     }
 }
 
-impl Layout for Template {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl<Ctx> Layout<Ctx> for Template {
+    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         // Each track's three slots as x offsets from its centre: middle, left, right.
         const SLOT_DX: [i32; 3] = [0, -1, 1];
         let cell = TRACK.iter().enumerate().find_map(|(track, &c)| {
@@ -260,13 +257,13 @@ impl Layout for Template {
         }
     }
 
-    fn size(&self) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         BlockPos::new(TRACK[TRACK.len() - 1] + 2, 2, 2)
     }
 
     /// The blocks a row can draw: the drive row, the relay, and one note and
     /// instrument block per stored voice.
-    fn block_palette(&self) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use WireConn::{None as Open, Side};
         let mut palette = HashSet::from([
             chain_block(),
@@ -284,8 +281,8 @@ impl Layout for Template {
 /// The fixed z0..=z4 startup.
 struct Linkage;
 
-impl Layout for Linkage {
-    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+impl<Ctx> Layout<Ctx> for Linkage {
+    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         use WireConn::{None as Open, Side};
         match (pos.z, pos.y, pos.x) {
             // z0..=z2
@@ -312,12 +309,12 @@ impl Layout for Linkage {
         }
     }
 
-    fn size(&self) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         BlockPos::new(92, 2, 5)
     }
 
     /// The whole fixed startup: its chain, button, repeaters and wire links.
-    fn block_palette(&self) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{East, South, West};
         use WireConn::{None as Open, Side};
         HashSet::from([
