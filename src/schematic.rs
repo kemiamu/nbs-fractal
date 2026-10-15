@@ -140,7 +140,8 @@ impl<T: Encode> Encode for Vec<T> {
     const TAG: Tag = Tag::List;
 
     fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        out.list(T::TAG, self.len() as i32)?;
+        let len = i32::try_from(self.len()).map_err(|_| out_of_range("list length"))?;
+        out.list(T::TAG, len)?;
         for item in self {
             item.body(out)?;
         }
@@ -155,7 +156,7 @@ impl<T: Encode> Encode for Vec<T> {
 /// Writes `region` to `sink` as a gzip-compressed litematic projection.
 pub fn save<R: Region, W: Write>(region: &R, metadata: Metadata, sink: W) -> io::Result<()> {
     let solid = Cell::new(0i64);
-    let schematic = Schematic::new(region, metadata, &solid);
+    let schematic = Schematic::new(region, metadata, &solid)?;
     let mut nbt = Nbt::new(GzEncoder::new(sink, Compression::default()));
     schematic.write(&mut nbt)?;
     nbt.into_inner().finish()?;
@@ -171,12 +172,13 @@ struct Schematic<'a, R: Region> {
 
 impl<'a, R: Region> Schematic<'a, R> {
     /// Assembles the projection around a palette discovered from `region`.
-    fn new(region: &'a R, metadata: Metadata<'a>, solid: &'a Cell<i64>) -> Self {
+    fn new(region: &'a R, metadata: Metadata<'a>, solid: &'a Cell<i64>) -> io::Result<Self> {
         let size = region.size();
         let palette = Palette::from_iter(region.block_palette());
         let bits = palette.bits();
-        let words = (size.volume() as usize * bits as usize).div_ceil(64) as i32;
-        Self {
+        let total = u64::from(size.volume()) * u64::from(bits);
+        let words = i32::try_from(total.div_ceil(64)).map_err(|_| out_of_range("BlockStates"))?;
+        Ok(Self {
             name: metadata.name,
             region: RegionNbt {
                 region,
@@ -192,7 +194,7 @@ impl<'a, R: Region> Schematic<'a, R> {
                 solid,
                 time: current_time(),
             },
-        }
+        })
     }
 
     /// Writes the projection forward: the region, then the versions and header.
@@ -273,7 +275,8 @@ impl Encode for Header<'_> {
         self.metadata.author.encode("Author", out)?;
         self.metadata.description.encode("Description", out)?;
         1i32.encode("RegionCount", out)?;
-        (self.size.volume() as i32).encode("TotalVolume", out)?;
+        let volume = i32::try_from(self.size.volume()).map_err(|_| out_of_range("TotalVolume"))?;
+        volume.encode("TotalVolume", out)?;
         self.solid.get().encode("TotalBlocks", out)?;
         self.time.encode("TimeCreated", out)?;
         self.time.encode("TimeModified", out)?;
@@ -284,12 +287,17 @@ impl Encode for Header<'_> {
 
 /// Packs palette ids into little-endian 64-bit words, one word per step, and
 /// counts the cells that are not air.
+///
+/// Each word is the low 64 bits of the accumulator, reinterpreted as a signed
+/// `i64`: the format stores raw two's-complement longs, so neither step is a
+/// numeric conversion.
 struct Packed<'a, R: Region> {
     region: &'a R,
     palette: &'a Palette,
     size: BlockPos,
     bits: u32,
-    cell: usize,
+    cell: u32,
+    cells: u32,
     acc: u128,
     have: u32,
     solid: &'a Cell<i64>,
@@ -298,12 +306,14 @@ struct Packed<'a, R: Region> {
 impl<'a, R: Region> Packed<'a, R> {
     /// Packs the ids `region` yields through `palette`, `bits` apiece.
     fn new(region: &'a R, palette: &'a Palette, bits: u32, solid: &'a Cell<i64>) -> Self {
+        let size = region.size();
         Self {
             region,
             palette,
-            size: region.size(),
+            size,
             bits,
             cell: 0,
+            cells: size.volume(),
             acc: 0,
             have: 0,
             solid,
@@ -315,15 +325,14 @@ impl<R: Region> Iterator for Packed<'_, R> {
     type Item = i64;
 
     fn next(&mut self) -> Option<i64> {
-        let cells = self.size.volume() as usize;
-        while self.have < 64 && self.cell < cells {
+        while self.have < 64 && self.cell < self.cells {
             let block = self
                 .region
                 .get_block(cell_pos(self.cell, self.size))
                 .unwrap_or_else(GenericBlockState::air);
             let id = self.palette.id_of(&block);
             self.solid.set(self.solid.get() + i64::from(id != 0));
-            self.acc |= u128::from(id) << self.have;
+            self.acc |= u128::try_from(id).expect("palette id fits in u128") << self.have;
             self.have += self.bits;
             self.cell += 1;
         }
@@ -339,21 +348,26 @@ impl<R: Region> Iterator for Packed<'_, R> {
 
 /// The position of the `index`-th cell of `size`, in writing order: `x` fastest,
 /// then `z`, then `y`.
-fn cell_pos(index: usize, size: BlockPos) -> BlockPos {
-    let (sx, sz) = (size.x as usize, size.z as usize);
+///
+/// Sizes are non-negative, so every coordinate lies inside the box and thus
+/// fits the `i32` a [`BlockPos`] is made of.
+fn cell_pos(index: u32, size: BlockPos) -> BlockPos {
+    let (sx, sz) = (size.x.unsigned_abs(), size.z.unsigned_abs());
+    let (x, rest) = (index % sx, index / sx);
     BlockPos::new(
-        (index % sx) as i32,
-        (index / (sx * sz)) as i32,
-        (index / sx % sz) as i32,
+        i32::try_from(x).expect("x lies inside the box"),
+        i32::try_from(rest / sz).expect("y lies inside the box"),
+        i32::try_from(rest % sz).expect("z lies inside the box"),
     )
 }
 
-/// Milliseconds since the Unix epoch.
+/// Milliseconds since the Unix epoch, saturating at the `i64` limit.
 fn current_time() -> i64 {
-    SystemTime::now()
+    let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_millis() as i64
+        .as_millis();
+    i64::try_from(millis).unwrap_or(i64::MAX)
 }
 
 // Palette
@@ -364,7 +378,7 @@ fn current_time() -> i64 {
 /// resolves in constant time rather than a linear scan.
 struct Palette {
     blocks: Vec<GenericBlockState>,
-    buckets: HashMap<u64, Vec<u16>, BuildHasherDefault<Identity>>,
+    buckets: HashMap<u64, Vec<usize>, BuildHasherDefault<Identity>>,
 }
 
 impl Palette {
@@ -386,23 +400,21 @@ impl Palette {
         if self.find(hash, &block).is_some() {
             return;
         }
-        let id = self.blocks.len() as u16;
+        let id = self.blocks.len();
         self.buckets.entry(hash).or_default().push(id);
         self.blocks.push(block);
     }
 
     /// The id of `block`, which this palette is contracted to contain.
-    fn id_of(&self, block: &GenericBlockState) -> u16 {
+    fn id_of(&self, block: &GenericBlockState) -> usize {
         self.find(block_hash(block), block)
             .expect("block_palette must cover every block the region emits")
     }
 
     /// The id of `block` if present, looked up by its precomputed `hash`.
-    fn find(&self, hash: u64, block: &GenericBlockState) -> Option<u16> {
+    fn find(&self, hash: u64, block: &GenericBlockState) -> Option<usize> {
         let ids = self.buckets.get(&hash)?;
-        ids.iter()
-            .copied()
-            .find(|&id| &self.blocks[id as usize] == block)
+        ids.iter().copied().find(|&id| &self.blocks[id] == block)
     }
 
     /// Bits per cell: the least that still names every palette entry, at least two.
@@ -497,8 +509,9 @@ impl<W: Write> Nbt<W> {
 
     /// Writes a tag id and a length-prefixed name.
     fn tag(&mut self, tag: Tag, name: &str) -> io::Result<()> {
+        let len = u16::try_from(name.len()).map_err(|_| out_of_range("tag name"))?;
         self.out.write_all(&[tag as u8])?;
-        self.out.write_all(&(name.len() as u16).to_be_bytes())?;
+        self.out.write_all(&len.to_be_bytes())?;
         self.out.write_all(name.as_bytes())
     }
 
@@ -519,7 +532,8 @@ impl<W: Write> Nbt<W> {
 
     /// Writes a length-prefixed UTF-8 payload.
     fn string(&mut self, value: &str) -> io::Result<()> {
-        self.out.write_all(&(value.len() as u16).to_be_bytes())?;
+        let len = u16::try_from(value.len()).map_err(|_| out_of_range("string"))?;
+        self.out.write_all(&len.to_be_bytes())?;
         self.out.write_all(value.as_bytes())
     }
 
@@ -543,4 +557,12 @@ impl<W: Write> Nbt<W> {
         }
         Ok(())
     }
+}
+
+/// The [`io::Error`] for a value that exceeds the range of its NBT field.
+fn out_of_range(field: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("{field} does not fit the NBT format"),
+    )
 }
