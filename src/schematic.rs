@@ -10,9 +10,9 @@ use self::nbt::{Nbt, Tag};
 use crate::{BlockState, layout::Layout};
 use flate2::{Compression, write::GzEncoder};
 use mcdata::util::BlockPos;
+use std::cell::Cell;
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{cell::Cell, collections::HashMap};
 
 const MINECRAFT_DATA_VERSION: i32 = 2975;
 const VERSION: i32 = 6;
@@ -117,7 +117,7 @@ impl<L: Layout> Encode for RegionNbt<'_, L> {
     fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
         BlockPos::ORIGIN.encode("Position", out)?;
         self.size.encode("Size", out)?;
-        self.palette.states.encode("BlockStatePalette", out)?;
+        self.palette.encode("BlockStatePalette", out)?;
         let block_states = BlockStates {
             layout: self.layout,
             palette: &self.palette,
@@ -271,47 +271,58 @@ fn current_time() -> i64 {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Distinct block states, air first then the rest ascending, with a map from
-/// state to id so a position resolves without a scan.
+/// Distinct non-air block states, ascending, one id per entry. Air is implied at
+/// id 0 rather than stored, since the format always names it first; so the ids
+/// stay fixed whatever order the set iterates in.
 struct Palette {
     states: Vec<BlockState>,
-    ids: HashMap<BlockState, usize>,
 }
 
 impl Palette {
-    /// Collects `states` into a palette ordered canonically: air first, then the
-    /// rest ascending, so the ids stay fixed whatever order the set iterates in.
+    /// Collects `states` into the non-air palette, ascending.
     fn from_iter<I: IntoIterator<Item = BlockState>>(states: I) -> Self {
         let air = BlockState::air();
         let mut states: Vec<BlockState> =
             states.into_iter().filter(|state| state != &air).collect();
         states.sort();
         states.dedup();
-        states.insert(0, air);
-        let ids: HashMap<BlockState, usize> = states
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(id, state)| (state, id))
-            .collect();
-        Self { states, ids }
+        Self { states }
     }
 
-    /// The id of `state`, which this palette is contracted to contain.
+    /// The id of `state`, which this palette is contracted to contain. Air is id
+    /// 0, and any other state is one past its place in the ascending list.
     fn id_of(&self, state: &BlockState) -> usize {
-        self.ids
-            .get(state)
-            .copied()
+        if state == &BlockState::air() {
+            return 0;
+        }
+        self.states
+            .binary_search(state)
+            .map(|index| index + 1)
             .expect("block_palette must cover every block the region emits")
     }
 
     /// Bits per position: the least that names every palette entry, at least two.
     fn num_bits(&self) -> u32 {
         let mut num_bits = 2;
-        while (1usize << num_bits) < self.states.len() {
+        while (1usize << num_bits) < self.states.len() + 1 {
             num_bits += 1;
         }
         num_bits
+    }
+}
+
+impl Encode for Palette {
+    const TAG: Tag = Tag::List;
+
+    /// Writes air first, then the stored states, naming a length one larger.
+    fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
+        let len = i32::try_from(self.states.len() + 1).map_err(|_| out_of_range("palette"))?;
+        out.list(BlockState::TAG, len)?;
+        BlockState::air().body(out)?;
+        for state in &self.states {
+            state.body(out)?;
+        }
+        Ok(())
     }
 }
 
@@ -320,7 +331,7 @@ impl Palette {
 // ++++++++++++============++++++++++++============++++++++++++============
 
 mod encode {
-    use super::{BlockPos, BlockState, Nbt, Tag, out_of_range};
+    use super::{BlockPos, BlockState, Nbt, Tag};
     use std::io::{self, Write};
 
     /// A value that writes itself as NBT under a given name.
@@ -392,19 +403,6 @@ mod encode {
             }
             out.end()?; // Properties
             out.end() // block state
-        }
-    }
-
-    impl<T: Encode> Encode for Vec<T> {
-        const TAG: Tag = Tag::List;
-
-        fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-            let len = i32::try_from(self.len()).map_err(|_| out_of_range("list length"))?;
-            out.list(T::TAG, len)?;
-            for item in self {
-                item.body(out)?;
-            }
-            Ok(())
         }
     }
 }
