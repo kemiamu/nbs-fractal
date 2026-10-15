@@ -6,6 +6,7 @@ use crate::BlockState;
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use rsnbs::types::{Tick, TimeAnchor};
+use std::collections::HashSet;
 
 // Shell: MultiFishboneLayout
 //
@@ -168,5 +169,28 @@ impl Layout for Template {
 
     fn size(&self) -> BlockPos {
         BlockPos::new(8, 2, 3)
+    }
+
+    /// The blocks a cell can draw: the spine and clock pass-through, one rib per
+    /// group, and one note and instrument block per stored tone.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        use Facing::{East, South};
+        use WireConn::{None as Open, Side};
+        let mut palette = HashSet::from([
+            chain_block(),
+            repeater("4", South, false, false),
+            wire_state(Side, Side, Open, Open, "0"),
+            wire_state(Open, Side, Side, Side, "0"),
+            wire_state(Open, Open, Side, Side, "0"),
+        ]);
+        let driven = (1..4).filter(|&g| self.filled(g));
+        for g in driven {
+            palette.insert(repeater(self.delay(g).to_string(), East, false, false));
+        }
+        for tone in self.groups.iter().flatten().flatten() {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
     }
 }

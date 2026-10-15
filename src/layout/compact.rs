@@ -5,6 +5,7 @@ use super::{Arranged, AsLayout, Axis, Clipped, EvenlyArranged, Layout, Overlaid,
 use crate::{BlockState, RedStoneTick};
 use mcdata::util::BlockPos;
 use rsnbs::{note::Tone, types::Tick};
+use std::collections::HashSet;
 use std::iter::{self, Peekable};
 use std::num::NonZero;
 
@@ -392,6 +393,37 @@ impl Layout for Tile {
     fn size(&self) -> BlockPos {
         BlockPos::new(3, 3, 2)
     }
+
+    /// The blocks a tile can draw: its stem and cap repeaters, the wire it rides
+    /// on, and one note and instrument block per stored tone.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        use Facing::{North, South};
+        let facing = match self.south_bound() {
+            true => South,
+            false => North,
+        };
+        let repeater = |delay: RedStoneTick| repeater(delay.to_string(), facing, false, false);
+        let mut palette = HashSet::from([chain_block()]);
+        if self.stem() == 0 || matches!(self, Tile::Node { .. }) {
+            palette.insert(redstone_wire());
+        }
+        if self.stem() > 0 {
+            palette.insert(repeater(self.stem()));
+        }
+        if let Tile::Hold { cap, .. } = *self {
+            palette.insert(repeater(cap));
+        }
+        let caps: &[Option<Tone>] = match self {
+            Tile::Hold { .. } => &[],
+            Tile::Node { cap, .. } => cap,
+            Tile::Sink { cap, .. } => cap,
+        };
+        for tone in caps.iter().flatten() {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -466,5 +498,24 @@ impl Layout for Turn {
 
     fn size(&self) -> BlockPos {
         BlockPos::new(self.width(), 3, 1)
+    }
+
+    /// The blocks a turn can draw: its stem repeater, the wire it rides on, and
+    /// one note and instrument block per stored tone.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        let mut palette = HashSet::from([chain_block(), redstone_wire()]);
+        if self.stem() > 0 {
+            let delay = self.stem().to_string();
+            palette.insert(repeater(delay, Facing::East, false, false));
+        }
+        let caps: &[Option<Tone>] = match self {
+            Turn::Sink { cap, .. } => cap,
+            Turn::Node { cap, .. } => std::slice::from_ref(cap),
+        };
+        for tone in caps.iter().flatten() {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
     }
 }

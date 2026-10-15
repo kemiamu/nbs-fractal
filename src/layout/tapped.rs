@@ -7,6 +7,7 @@ use crate::{BlockState, RedStoneTick, analysis::BoundedTec};
 use mcdata::util::BlockPos;
 use rsnbs::note::{Instrument, Key, Tone};
 use rsnbs::types::Tick;
+use std::collections::HashSet;
 use std::num::NonZero;
 
 // TappedLayout
@@ -103,6 +104,13 @@ impl Layout for TappedLayout {
     fn size(&self) -> BlockPos {
         self.size
     }
+
+    /// The control lines and the playing units together.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        let mut palette = self.control.block_palette();
+        palette.extend(self.playing.block_palette());
+        palette
+    }
 }
 
 // TapLine
@@ -153,10 +161,6 @@ impl TapLine {
             let switch_west = if self.switch { Side } else { None };
             wire_state(switch_west, Side, None, switch_south, "0")
         };
-        let button = || {
-            let tone = Tone::new(Instrument::BassDrum, Key::from_minecraft_note(0).unwrap());
-            tone.note_block_state().unwrap_or_else(chain_block)
-        };
 
         match (local_easting, local_elevation) {
             (1, 3) => Some(redstone_torch(Option::None::<&'static str>, true)),
@@ -165,11 +169,30 @@ impl TapLine {
             (1..=4, 1) if self.switch => Some(chain_block()),
             (2, 2) if self.switch => Some(repeater("4", Facing::East, false, false)),
             (3, 2) if self.switch => Some(observer("west")),
-            (4, 2) if self.switch => Some(button()),
+            (4, 2) if self.switch => Some(switch_button()),
             (1, 0) if !self.switch => Some(chain_block()),
             (1, 1) if !self.switch => Some(redstone_torch(Option::None::<&'static str>, false)),
             _ => Option::None,
         }
+    }
+
+    /// The blocks the port can draw: its torches, its switch hardware, and the
+    /// wire link that closes the line.
+    fn port_palette(&self) -> HashSet<BlockState> {
+        use WireConn::{None as Open, Side};
+        let (switch_west, switch_south) = match self.switch {
+            true => (Side, Open),
+            false => (Open, Side),
+        };
+        HashSet::from([
+            chain_block(),
+            redstone_torch(Option::None::<&'static str>, true),
+            redstone_torch(Option::None::<&'static str>, false),
+            wire_state(switch_west, Side, Open, switch_south, "0"),
+            repeater("4", Facing::East, false, false),
+            observer("west"),
+            switch_button(),
+        ])
     }
 }
 
@@ -184,6 +207,19 @@ impl Layout for TapLine {
     fn size(&self) -> BlockPos {
         self.size
     }
+
+    /// The port's fixed hardware, plus every delay element's palette.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        let mut palette = self.port_palette();
+        palette.extend(self.delays.block_palette());
+        palette
+    }
+}
+
+/// The switch's source button: a bass-drum note block.
+fn switch_button() -> BlockState {
+    let tone = Tone::new(Instrument::BassDrum, Key::from_minecraft_note(0).unwrap());
+    tone.note_block_state().unwrap_or_else(chain_block)
 }
 
 // Tap
@@ -243,5 +279,32 @@ impl Layout for Tap {
 
     fn size(&self) -> BlockPos {
         self.size
+    }
+
+    /// The blocks a delay element can draw: its chain, torches, repeaters and the
+    /// wire links that carry its tapped delay.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        use Facing::{East, North, West};
+        use WireConn::{None as Open, Side};
+        let delay = self.delay.get();
+        let clamp = |tick: Tick| tick.min(4).to_string();
+        let cycle = |off: Tick, modu: Tick| clamp((delay + off) % modu);
+        let decay = |sub: Tick| clamp(delay.saturating_sub(sub));
+        HashSet::from([
+            chain_block(),
+            redstone_torch(Some("south"), false),
+            redstone_torch(Some("south"), true),
+            repeater("3", West, true, false),
+            repeater("4", West, true, false),
+            repeater("4", East, false, false),
+            repeater(decay(3), North, false, false),
+            repeater(decay(6), East, false, false),
+            repeater(decay(10), East, false, false),
+            repeater(cycle(3, 8), East, false, false),
+            repeater(cycle(3, 8), West, true, false),
+            redstone_wire(),
+            wire_state(Open, Open, Side, Side, "0"),
+            wire_state(Side, Side, Open, Open, "15"),
+        ])
     }
 }

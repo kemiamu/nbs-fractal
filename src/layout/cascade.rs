@@ -10,6 +10,7 @@ use crate::BlockState;
 use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
+use std::collections::HashSet;
 use std::iter;
 
 // Layout: CascadeLayout
@@ -262,6 +263,22 @@ impl Layout for Template {
     fn size(&self) -> BlockPos {
         BlockPos::new(TRACK[TRACK.len() - 1] + 2, 2, 2)
     }
+
+    /// The blocks a row can draw: the drive row, the relay, and one note and
+    /// instrument block per stored voice.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        use WireConn::{None as Open, Side};
+        let mut palette = HashSet::from([
+            chain_block(),
+            repeater("1", Facing::South, false, false),
+            wire_state(Open, Open, Side, Side, "0"),
+        ]);
+        for tone in self.slots.iter().flatten().flatten() {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
+    }
 }
 
 /// The fixed z0..=z4 startup.
@@ -297,6 +314,27 @@ impl Layout for Linkage {
 
     fn size(&self) -> BlockPos {
         BlockPos::new(92, 2, 5)
+    }
+
+    /// The whole fixed startup: its chain, button, repeaters and wire links.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        use Facing::{East, South, West};
+        use WireConn::{None as Open, Side};
+        HashSet::from([
+            chain_block(),
+            button(),
+            repeater("1", South, false, false),
+            repeater("1", West, false, false),
+            repeater("1", East, false, false),
+            repeater("2", South, false, false),
+            repeater("3", South, false, false),
+            repeater("4", South, false, false),
+            wire_state(Open, Side, Open, Side, "0"),
+            wire_state(Side, Open, Open, Side, "0"),
+            wire_state(Side, Side, Side, Side, "0"),
+            wire_state(Side, Side, Open, Side, "0"),
+            wire_state(Side, Side, Open, Open, "0"),
+        ])
     }
 }
 
