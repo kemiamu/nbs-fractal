@@ -1,4 +1,3 @@
-use crate::layout::Layout;
 use counter::Counter;
 use ordered_float::OrderedFloat;
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
@@ -547,10 +546,13 @@ fn test_linear_layout() {
         .collect();
     let tracks = notes.split_by_layer_gaps();
     let layout = MultiLinearLayout::new(tracks, 0, song_length);
-    let litematic = layout.as_litematic("Linear from source.nbs", "rustnbs");
-    litematic
-        .write_file("../rsnbs/fixtures/generated_linear.litematic")
-        .unwrap();
+    let metadata = crate::schematic::Metadata {
+        name: "Note Block Track Schematic",
+        description: "Linear from source.nbs",
+        author: "rustnbs",
+    };
+    let file = std::fs::File::create("../rsnbs/fixtures/generated_linear.litematic").unwrap();
+    crate::schematic::save(&layout, metadata, file).unwrap();
 }
 
 #[test]

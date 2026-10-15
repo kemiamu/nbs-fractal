@@ -11,6 +11,19 @@ pub mod schematic;
 #[cfg(test)]
 mod tests;
 
+use mcdata::{GenericBlockState, util::BlockPos};
+
+/// Every layout is a block region, so any of them can be written out as is.
+impl<L: layout::Layout> schematic::Region for L {
+    fn size(&self) -> BlockPos {
+        layout::Layout::size(self)
+    }
+
+    fn get_block(&self, pos: BlockPos) -> Option<GenericBlockState> {
+        layout::Layout::block_at(self, pos)
+    }
+}
+
 /// Redstone tick (10 t/s).
 pub type RedStoneTick = rsnbs::types::Tick;
 /// Game tick (20 t/s).

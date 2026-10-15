@@ -119,11 +119,14 @@ fn sweep_all_panning_and_volume() {
     let layout = TorrentLayout::new(&tracks, slices);
     assert_eq!(placed(&layout).len(), TICKS * voices.len());
 
-    let litematic = layout.as_litematic("Torrent pan/volume audition", "nbs-fractal");
+    let metadata = nbs_fractal::schematic::Metadata {
+        name: "Note Block Track Schematic",
+        description: "Torrent pan/volume audition",
+        author: "nbs-fractal",
+    };
     std::fs::create_dir_all("out").ok();
-    litematic
-        .write_file("out/torrent_pan_volume.litematic")
-        .unwrap();
+    let file = std::fs::File::create("out/torrent_pan_volume.litematic").unwrap();
+    nbs_fractal::schematic::save(&layout, metadata, file).unwrap();
 }
 
 #[test]

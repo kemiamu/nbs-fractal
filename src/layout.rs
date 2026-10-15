@@ -1,9 +1,6 @@
 //! Projection layouts: the note-to-block arrangement a song projects into.
 
-use itertools::iproduct;
 use mcdata::{BlockState, GenericBlockState, util::BlockPos};
-use rustmatica::{Litematic, Region};
-use std::borrow::Cow;
 
 pub mod blocks;
 pub mod cascade;
@@ -43,26 +40,6 @@ pub trait Layout {
     fn contains(&self, pos: BlockPos) -> bool {
         let size = self.size();
         (0..size.x).contains(&pos.x) && (0..size.y).contains(&pos.y) && (0..size.z).contains(&pos.z)
-    }
-
-    /// Build a litematic projection of this layout.
-    fn as_litematic(
-        &self,
-        description: impl Into<Cow<'static, str>>,
-        author: impl Into<Cow<'static, str>>,
-    ) -> Litematic
-    where
-        Self: Sized,
-    {
-        const NAME: &str = "Note Block Track Schematic";
-        let size = self.size();
-        let mut region: Region<GenericBlockState> = Region::new(NAME, BlockPos::ORIGIN, size);
-
-        for (y, z, x) in iproduct!(0..size.y, 0..size.z, 0..size.x) {
-            let pos = BlockPos::new(x, y, z);
-            region.set_block(pos, self.get_block(pos).unwrap_or_else(air));
-        }
-        region.as_litematic(description, author)
     }
 }
 
