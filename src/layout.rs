@@ -4,7 +4,6 @@ use crate::schematic::{self, Metadata};
 use itertools::iproduct;
 use mcdata::{BlockState, GenericBlockState, util::BlockPos};
 use std::io::{self, Write};
-use std::iter;
 
 pub mod blocks;
 pub mod cascade;
@@ -51,23 +50,29 @@ pub trait Layout {
         (0..size.x).contains(&pos.x) && (0..size.y).contains(&pos.y) && (0..size.z).contains(&pos.z)
     }
 
-    /// The palette the layout draws on: every block it can emit, air first.
+    /// The palette the layout draws on: every distinct block it can emit, air
+    /// first, in first-seen writing order.
     ///
     /// A layout that already knows its palette declares it here to spare the
     /// writer a discovery pass; the default walks [`get_block`](Self::get_block)
-    /// over the whole box. Repeats are allowed, since the writer keeps only the
-    /// first occurrence of each block and preserves that first-seen order.
-    fn block_palette(&self) -> impl Iterator<Item = GenericBlockState> + '_
-    where
-        Self: Sized,
-    {
+    /// over the whole box and keeps the first occurrence of each block.
+    ///
+    /// **Warning:** this is expected to return a set, but returns a [`Vec`]
+    /// until upstream provides `Hash`/`Ord` for [`GenericBlockState`].
+    fn block_palette(&self) -> Vec<GenericBlockState> {
         let size = self.size();
         let cell = |(y, z, x)| {
             let block = self.get_block(BlockPos::new(x, y, z));
             block.unwrap_or_else(GenericBlockState::air)
         };
-        let cells = iproduct!(0..size.y, 0..size.z, 0..size.x).map(cell);
-        iter::once(GenericBlockState::air()).chain(cells)
+        // TODO HACK: waiting on upstream support for Hash or Ord/PartialOrd
+        let mut palette = vec![GenericBlockState::air()];
+        for block in iproduct!(0..size.y, 0..size.z, 0..size.x).map(cell) {
+            if !palette.contains(&block) {
+                palette.push(block);
+            }
+        }
+        palette
     }
 
     /// Writes this layout to `sink` as a gzip-compressed litematic projection,
@@ -119,7 +124,7 @@ impl<T: AsLayout> Layout for T {
         self.as_layout().size()
     }
 
-    fn block_palette(&self) -> impl Iterator<Item = GenericBlockState> + '_ {
+    fn block_palette(&self) -> Vec<GenericBlockState> {
         self.as_layout().block_palette()
     }
 }
