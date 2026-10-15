@@ -7,7 +7,7 @@
 
 use self::encode::Encode;
 use self::nbt::{Nbt, Tag};
-use crate::{GenericBlockState, layout::Layout};
+use crate::{BlockState, layout::Layout};
 use flate2::{Compression, write::GzEncoder};
 use mcdata::util::BlockPos;
 use std::io::{self, Write};
@@ -261,21 +261,21 @@ fn current_time() -> i64 {
 /// Distinct block states in first-seen order, with a map from state to id so a
 /// cell resolves without a scan.
 struct Palette {
-    blocks: Vec<GenericBlockState>,
-    ids: HashMap<GenericBlockState, usize>,
+    blocks: Vec<BlockState>,
+    ids: HashMap<BlockState, usize>,
 }
 
 impl Palette {
     /// Collects `blocks` into a palette ordered canonically: air first, then the
     /// rest ascending, so the ids stay fixed whatever order the set iterates in.
-    fn from_iter<I: IntoIterator<Item = GenericBlockState>>(blocks: I) -> Self {
-        let air = GenericBlockState::air();
-        let mut blocks: Vec<GenericBlockState> =
+    fn from_iter<I: IntoIterator<Item = BlockState>>(blocks: I) -> Self {
+        let air = BlockState::air();
+        let mut blocks: Vec<BlockState> =
             blocks.into_iter().filter(|block| block != &air).collect();
         blocks.sort();
         blocks.dedup();
         blocks.insert(0, air);
-        let ids: HashMap<GenericBlockState, usize> = blocks
+        let ids: HashMap<BlockState, usize> = blocks
             .iter()
             .cloned()
             .enumerate()
@@ -285,7 +285,7 @@ impl Palette {
     }
 
     /// The id of `block`, which this palette is contracted to contain.
-    fn id_of(&self, block: &GenericBlockState) -> usize {
+    fn id_of(&self, block: &BlockState) -> usize {
         self.ids
             .get(block)
             .copied()
@@ -307,7 +307,7 @@ impl Palette {
 // ++++++++++++============++++++++++++============++++++++++++============
 
 mod encode {
-    use super::{BlockPos, GenericBlockState, Nbt, Tag, out_of_range};
+    use super::{BlockPos, BlockState, Nbt, Tag, out_of_range};
     use std::io::{self, Write};
 
     /// A value that writes itself as NBT under a given name.
@@ -368,7 +368,7 @@ mod encode {
         }
     }
 
-    impl Encode for GenericBlockState {
+    impl Encode for BlockState {
         const TAG: Tag = Tag::Compound;
 
         fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {

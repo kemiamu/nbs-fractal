@@ -2,7 +2,7 @@
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
 use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air, include};
-use crate::GenericBlockState;
+use crate::BlockState;
 use crate::playable;
 use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
@@ -228,7 +228,7 @@ impl Linkage {
 }
 
 impl Layout for Linkage {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         Some(self.0.regions[0].get_block(pos).clone().into())
     }
 
@@ -237,7 +237,7 @@ impl Layout for Linkage {
     }
 
     /// The embedded projection's own palette, read straight back out.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         self.0.regions[0]
             .block_palette()
             .iter()
@@ -256,7 +256,7 @@ struct Template<'a> {
 }
 
 impl Layout for Template<'_> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         // The track holding this position, by binary search: within `±1` in x and
         // `[-2, 0]` in y, and centres four apart, so one x column is the only one.
         let lo = self.tracks.partition_point(|&(tx, _)| tx < pos.x - 1);
@@ -307,7 +307,7 @@ impl Layout for Template<'_> {
 
     /// The blocks a slice can draw: the fixed circuit row plus one note and one
     /// instrument block per stored voice.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         use WireConn::{None as Open, Side};
         let mut palette = HashSet::from([
             drive_repeater(),
@@ -324,13 +324,13 @@ impl Layout for Template<'_> {
 }
 
 /// The drive repeater that sets a track's note row going.
-fn drive_repeater() -> GenericBlockState {
+fn drive_repeater() -> BlockState {
     repeater("1", Facing::South, false, false)
 }
 
 /// The barrier that scaffolds a track.
-fn barrier() -> GenericBlockState {
-    GenericBlockState {
+fn barrier() -> BlockState {
+    BlockState {
         name: "minecraft:barrier".into(),
         properties: From::from([("waterlogged".into(), "false".into())]),
     }

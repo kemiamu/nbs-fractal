@@ -1,6 +1,6 @@
 //! Projection layouts: the note-to-block arrangement a song projects into.
 
-use crate::GenericBlockState;
+use crate::BlockState;
 use crate::schematic::{self, Metadata};
 use itertools::iproduct;
 use mcdata::util::BlockPos;
@@ -27,19 +27,19 @@ pub mod torrent;
 /// written out with nothing else in scope.
 pub trait Layout {
     /// Block at the given world position, assumed to be in bounds.
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState>;
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState>;
 
     /// Total size of the bounding box.
     fn size(&self) -> BlockPos;
 
     /// Block at the given world position; panics on out-of-bounds access.
-    fn get_block(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn get_block(&self, pos: BlockPos) -> Option<BlockState> {
         debug_assert!(self.contains(pos), "block out of bounds: {pos:?}");
         self.block_at(pos)
     }
 
     /// Block at the given world position; `None` when it misses the bounding box.
-    fn try_get_block(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn try_get_block(&self, pos: BlockPos) -> Option<BlockState> {
         match self.contains(pos) {
             true => self.block_at(pos),
             false => None,
@@ -47,7 +47,7 @@ pub trait Layout {
     }
 
     /// Block at the given world position, or air where the layout is empty.
-    fn get_block_or_air(&self, pos: BlockPos) -> GenericBlockState {
+    fn get_block_or_air(&self, pos: BlockPos) -> BlockState {
         self.get_block(pos).unwrap_or_else(air)
     }
 
@@ -64,7 +64,7 @@ pub trait Layout {
     /// whole-box discovery walk; the default does exactly that walk via
     /// [`get_block_or_air`](Self::get_block_or_air). The writer alone fixes the
     /// id order, so the set need not be ordered.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         let size = self.size();
         let at = |(y, z, x)| self.get_block_or_air(BlockPos::new(x, y, z));
         // Insert one by one: `collect` would reserve the box's whole volume
@@ -87,7 +87,7 @@ pub trait Layout {
 }
 
 impl Layout for () {
-    fn block_at(&self, _pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, _pos: BlockPos) -> Option<BlockState> {
         None
     }
 
@@ -97,7 +97,7 @@ impl Layout for () {
 }
 
 impl Layout for Box<dyn Layout + '_> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         self.as_ref().block_at(pos)
     }
 
@@ -105,7 +105,7 @@ impl Layout for Box<dyn Layout + '_> {
         self.as_ref().size()
     }
 
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         self.as_ref().block_palette()
     }
 }
@@ -121,7 +121,7 @@ pub trait AsLayout {
 }
 
 impl<T: AsLayout> Layout for T {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         self.as_layout().block_at(pos)
     }
 
@@ -129,7 +129,7 @@ impl<T: AsLayout> Layout for T {
         self.as_layout().size()
     }
 
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         self.as_layout().block_palette()
     }
 }
@@ -170,7 +170,7 @@ impl<L: Layout> Arranged<L> {
 }
 
 impl<L: Layout> Layout for Arranged<L> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         let index = self
             .bands
             .partition_point(|(_, a)| a.y <= pos.y && a.z <= pos.z && a.x <= pos.x)
@@ -186,7 +186,7 @@ impl<L: Layout> Layout for Arranged<L> {
     }
 
     /// The union of every band's palette.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         let mut palette = HashSet::new();
         for (layout, _) in &self.bands {
             palette.extend(layout.block_palette());
@@ -273,7 +273,7 @@ impl<L: Layout> EvenlyArranged<L> {
 }
 
 impl<L: Layout> Layout for EvenlyArranged<L> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         let local_pos = pos + self.anchor;
         let offset = self.pitch.dot(local_pos);
         let top = (offset - self.bias)
@@ -290,7 +290,7 @@ impl<L: Layout> Layout for EvenlyArranged<L> {
     }
 
     /// The union of every item's palette.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         let mut palette = HashSet::new();
         for item in &self.items {
             palette.extend(item.block_palette());
@@ -336,7 +336,7 @@ impl<A: Layout, B: Layout> Overlaid<A, B> {
 }
 
 impl<A: Layout, B: Layout> Layout for Overlaid<A, B> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         let (anchor, layout) = &self.first;
         layout.try_get_block(pos - *anchor).or_else(|| {
             let (anchor, layout) = &self.second;
@@ -349,7 +349,7 @@ impl<A: Layout, B: Layout> Layout for Overlaid<A, B> {
     }
 
     /// The union of both sub-layouts' palettes.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         let mut palette = self.first.1.block_palette();
         palette.extend(self.second.1.block_palette());
         palette
@@ -385,7 +385,7 @@ impl<L: Layout> Reverse<L> {
 }
 
 impl<L: Layout> Layout for Reverse<L> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         let orig = BlockPos::new(
             self.bias.x + self.factor.x * pos.x,
             self.bias.y + self.factor.y * pos.y,
@@ -399,7 +399,7 @@ impl<L: Layout> Layout for Reverse<L> {
     }
 
     /// The inner palette: mirroring moves cells, it draws no new block.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         self.layout.block_palette()
     }
 }
@@ -423,7 +423,7 @@ impl<L: Layout> WithFloor<L> {
 }
 
 impl<L: Layout> Layout for WithFloor<L> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         let inner = |pos: BlockPos| self.layout.get_block(pos);
         match pos.y {
             0 if self.full => Some(floor_block()),
@@ -441,7 +441,7 @@ impl<L: Layout> Layout for WithFloor<L> {
 
     /// The inner palette plus the floor block, the only block this wrapper adds
     /// on top of what the inner layout draws.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         let mut palette = self.layout.block_palette();
         palette.insert(floor_block());
         palette
@@ -454,7 +454,7 @@ pub trait NeedsFloor {
     fn needs_floor(&self) -> bool;
 }
 
-impl NeedsFloor for GenericBlockState {
+impl NeedsFloor for BlockState {
     fn needs_floor(&self) -> bool {
         self.name == "minecraft:sand"
     }
@@ -489,7 +489,7 @@ impl<L: Layout> Clipped<L> {
 }
 
 impl<L: Layout> Layout for Clipped<L> {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         self.layout.get_block(pos + self.anchor)
     }
 
@@ -498,7 +498,7 @@ impl<L: Layout> Layout for Clipped<L> {
     }
 
     /// The inner palette: clipping only drops cells, it draws no new block.
-    fn block_palette(&self) -> HashSet<GenericBlockState> {
+    fn block_palette(&self) -> HashSet<BlockState> {
         self.layout.block_palette()
     }
 }
@@ -602,12 +602,12 @@ fn include(a: BlockPos, b: BlockPos) -> BlockPos {
     BlockPos::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z))
 }
 
-fn air() -> GenericBlockState {
-    GenericBlockState::air()
+fn air() -> BlockState {
+    BlockState::air()
 }
 
-fn floor_block() -> GenericBlockState {
-    GenericBlockState {
+fn floor_block() -> BlockState {
+    BlockState {
         name: "minecraft:gray_stained_glass".into(),
         properties: Default::default(),
     }
@@ -625,7 +625,7 @@ mod tests {
     struct Solid(BlockPos);
 
     impl Layout for Solid {
-        fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+        fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
             self.contains(pos).then(air)
         }
 

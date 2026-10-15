@@ -1,6 +1,6 @@
 //! Block state projections for notes and instruments.
 
-use crate::GenericBlockState;
+use crate::BlockState;
 use rsnbs::note::{ImitateInstrument, Instrument, Tone};
 use std::{borrow::Cow, collections::BTreeMap};
 
@@ -16,17 +16,17 @@ fn is_valid(tone: &Tone) -> bool {
 /// Block states projected from a [`Tone`].
 pub trait ToneBlocks {
     /// returns the minecraft note block block state for this tone.
-    fn note_block_state(&self) -> Option<GenericBlockState>;
+    fn note_block_state(&self) -> Option<BlockState>;
 
     /// returns the block under the note block for this instrument's sound.
-    fn instrument_block_state(&self) -> Option<GenericBlockState>;
+    fn instrument_block_state(&self) -> Option<BlockState>;
 
     /// returns the mob head block for this tone, if it is a mob head instrument.
-    fn head_block_state(&self) -> Option<GenericBlockState>;
+    fn head_block_state(&self) -> Option<BlockState>;
 }
 
 impl ToneBlocks for Tone {
-    fn note_block_state(&self) -> Option<GenericBlockState> {
+    fn note_block_state(&self) -> Option<BlockState> {
         let note = self.key.minecraft_note()?;
         let instr = self.instrument.note_property();
         let properties = From::from([
@@ -34,13 +34,13 @@ impl ToneBlocks for Tone {
             ("powered".into(), "false".into()),
             ("instrument".into(), instr.into()),
         ]);
-        Some(GenericBlockState {
+        Some(BlockState {
             name: "minecraft:note_block".into(),
             properties,
         })
     }
 
-    fn instrument_block_state(&self) -> Option<GenericBlockState> {
+    fn instrument_block_state(&self) -> Option<BlockState> {
         if !is_valid(self) || matches!(self.instrument, Instrument::Imitate(_)) {
             return None;
         }
@@ -49,18 +49,18 @@ impl ToneBlocks for Tone {
             Instrument::Banjo => From::from([("axis".into(), "y".into())]),
             _ => BTreeMap::new(),
         };
-        Some(GenericBlockState {
+        Some(BlockState {
             name: block.into(),
             properties,
         })
     }
 
-    fn head_block_state(&self) -> Option<GenericBlockState> {
+    fn head_block_state(&self) -> Option<BlockState> {
         if !is_valid(self) || !matches!(self.instrument, Instrument::Imitate(_)) {
             return None;
         }
         let block = self.instrument.block_resource().unwrap();
-        Some(GenericBlockState {
+        Some(BlockState {
             name: block.into(),
             properties: BTreeMap::new(),
         })
@@ -80,10 +80,10 @@ pub trait InstrumentBlocks {
     fn block_resource(&self) -> Option<&'static str>;
 
     /// returns the block under the note block for this instrument's sound.
-    fn instrument_block(&self) -> Option<GenericBlockState>;
+    fn instrument_block(&self) -> Option<BlockState>;
 
     /// returns the mob head block for this instrument, if it is a mob head instrument.
-    fn head_block(&self) -> Option<GenericBlockState>;
+    fn head_block(&self) -> Option<BlockState>;
 }
 
 impl InstrumentBlocks for Instrument {
@@ -141,23 +141,23 @@ impl InstrumentBlocks for Instrument {
         })
     }
 
-    fn instrument_block(&self) -> Option<GenericBlockState> {
+    fn instrument_block(&self) -> Option<BlockState> {
         if matches!(self, Self::Imitate(_)) {
             return None;
         }
         let block = self.block_resource()?;
-        Some(GenericBlockState {
+        Some(BlockState {
             name: Cow::Borrowed(block),
             properties: BTreeMap::new(),
         })
     }
 
-    fn head_block(&self) -> Option<GenericBlockState> {
+    fn head_block(&self) -> Option<BlockState> {
         if !matches!(self, Self::Imitate(_)) {
             return None;
         }
         let block = self.block_resource()?;
-        Some(GenericBlockState {
+        Some(BlockState {
             name: block.into(),
             properties: BTreeMap::new(),
         })
@@ -208,26 +208,20 @@ impl ImitateBlocks for ImitateInstrument {
 // ++++++++++++============++++++++++++============++++++++++++============
 
 /// Note block, or fallback on None.
-pub fn note_block<T: AsRef<Tone>>(
-    note: Option<T>,
-    fallback: fn() -> GenericBlockState,
-) -> GenericBlockState {
+pub fn note_block<T: AsRef<Tone>>(note: Option<T>, fallback: fn() -> BlockState) -> BlockState {
     note.and_then(|t| t.as_ref().note_block_state())
         .unwrap_or_else(fallback)
 }
 
 /// Instrument block, or fallback on None.
-pub fn inst_block<T: AsRef<Tone>>(
-    note: Option<T>,
-    fallback: fn() -> GenericBlockState,
-) -> GenericBlockState {
+pub fn inst_block<T: AsRef<Tone>>(note: Option<T>, fallback: fn() -> BlockState) -> BlockState {
     note.and_then(|t| t.as_ref().instrument_block_state())
         .unwrap_or_else(fallback)
 }
 
 /// Base block that the circuitry is carried on.
-pub fn chain_block() -> GenericBlockState {
-    GenericBlockState {
+pub fn chain_block() -> BlockState {
+    BlockState {
         name: "minecraft:smooth_stone".into(),
         properties: Default::default(),
     }
@@ -256,7 +250,7 @@ impl WireConn {
 }
 
 /// Redstone wire connected on every side, unpowered.
-pub fn redstone_wire() -> GenericBlockState {
+pub fn redstone_wire() -> BlockState {
     wire_state(
         WireConn::Side,
         WireConn::Side,
@@ -275,8 +269,8 @@ pub fn wire_state(
     north: WireConn,
     south: WireConn,
     power: impl Into<Cow<'static, str>>,
-) -> GenericBlockState {
-    GenericBlockState {
+) -> BlockState {
+    BlockState {
         name: "minecraft:redstone_wire".into(),
         properties: From::from([
             ("power".into(), power.into()),
@@ -331,10 +325,10 @@ pub fn repeater(
     toward: Facing,
     powered: bool,
     locked: bool,
-) -> GenericBlockState {
+) -> BlockState {
     let powered = if powered { "true" } else { "false" };
     let locked = if locked { "true" } else { "false" };
-    GenericBlockState {
+    BlockState {
         name: "minecraft:repeater".into(),
         properties: From::from([
             ("delay".into(), delay.into()),
@@ -348,8 +342,8 @@ pub fn repeater(
 }
 
 /// Observer block with facing.
-pub fn observer(facing: impl Into<Cow<'static, str>>) -> GenericBlockState {
-    GenericBlockState {
+pub fn observer(facing: impl Into<Cow<'static, str>>) -> BlockState {
+    BlockState {
         name: "minecraft:observer".into(),
         properties: From::from([
             ("facing".into(), facing.into()),
@@ -359,8 +353,8 @@ pub fn observer(facing: impl Into<Cow<'static, str>>) -> GenericBlockState {
 }
 
 /// Sticky piston block, not extended.
-pub fn sticky_piston<T: Into<Cow<'static, str>>>(facing: T) -> GenericBlockState {
-    GenericBlockState {
+pub fn sticky_piston<T: Into<Cow<'static, str>>>(facing: T) -> BlockState {
+    BlockState {
         name: "minecraft:sticky_piston".into(),
         properties: From::from([
             ("facing".into(), facing.into()),
@@ -370,18 +364,15 @@ pub fn sticky_piston<T: Into<Cow<'static, str>>>(facing: T) -> GenericBlockState
 }
 
 /// Redstone block.
-pub fn redstone_block() -> GenericBlockState {
-    GenericBlockState {
+pub fn redstone_block() -> BlockState {
+    BlockState {
         name: "minecraft:redstone_block".into(),
         properties: Default::default(),
     }
 }
 
 /// Redstone torch with lit state and optional facing.
-pub fn redstone_torch<T: Into<Cow<'static, str>>>(
-    facing: Option<T>,
-    lit: bool,
-) -> GenericBlockState {
+pub fn redstone_torch<T: Into<Cow<'static, str>>>(facing: Option<T>, lit: bool) -> BlockState {
     let lit = if lit { "true" } else { "false" };
     let name = match facing.is_some() {
         true => "minecraft:redstone_wall_torch".into(),
@@ -391,5 +382,5 @@ pub fn redstone_torch<T: Into<Cow<'static, str>>>(
         Some(f) => From::from([("lit".into(), lit.into()), ("facing".into(), f.into())]),
         None => From::from([("lit".into(), lit.into())]),
     };
-    GenericBlockState { name, properties }
+    BlockState { name, properties }
 }

@@ -1,8 +1,8 @@
 //! The streaming writer must reproduce the rustmatica reference projection.
 
 use itertools::iproduct;
-use mcdata::{BlockState, util::BlockPos};
-use nbs_fractal::GenericBlockState;
+use mcdata::{BlockState as _, util::BlockPos};
+use nbs_fractal::BlockState;
 use nbs_fractal::layout::Layout;
 use nbs_fractal::schematic::Metadata;
 use rustmatica::{Litematic, Region};
@@ -10,8 +10,8 @@ use rustmatica::{Litematic, Region};
 const NAME: &str = "Note Block Track Schematic";
 
 /// A block state from a name and a list of properties.
-fn block(name: &'static str, props: &[(&'static str, &'static str)]) -> GenericBlockState {
-    GenericBlockState {
+fn block(name: &'static str, props: &[(&'static str, &'static str)]) -> BlockState {
+    BlockState {
         name: name.into(),
         properties: props
             .iter()
@@ -26,7 +26,7 @@ struct Sample;
 const SIZE: BlockPos = BlockPos::new(4, 3, 3);
 
 impl Layout for Sample {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         let harp = [("instrument", "harp"), ("note", "12"), ("powered", "false")];
         let repeater = [
             ("delay", "1"),

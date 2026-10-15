@@ -6,7 +6,7 @@
 use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, inst_block};
 use super::blocks::{note_block, repeater, wire_state};
 use super::{AsLayout, EvenlyArranged, Layout, Overlaid, air};
-use crate::GenericBlockState;
+use crate::BlockState;
 use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
@@ -204,7 +204,7 @@ impl Template {
 
     /// Keeps a track's middle slot powered when it carries no voice, so the row's
     /// signal still runs through.
-    fn relay(&self, y: i32, track: usize, x: i32) -> Option<GenericBlockState> {
+    fn relay(&self, y: i32, track: usize, x: i32) -> Option<BlockState> {
         use WireConn::{None as Open, Side};
         let slots = &self.slots[track];
         let split = slots[1].is_some() || slots[2].is_some();
@@ -239,7 +239,7 @@ impl Template {
 }
 
 impl Layout for Template {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         // Each track's three slots as x offsets from its centre: middle, left, right.
         const SLOT_DX: [i32; 3] = [0, -1, 1];
         let cell = TRACK.iter().enumerate().find_map(|(track, &c)| {
@@ -268,7 +268,7 @@ impl Layout for Template {
 struct Linkage;
 
 impl Layout for Linkage {
-    fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState> {
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
         use WireConn::{None as Open, Side};
         match (pos.z, pos.y, pos.x) {
             // z0..=z2
@@ -301,13 +301,13 @@ impl Layout for Linkage {
 }
 
 /// The centre source button.
-fn button() -> GenericBlockState {
+fn button() -> BlockState {
     let properties = From::from([
         ("face".into(), "floor".into()),
         ("facing".into(), "south".into()),
         ("powered".into(), "false".into()),
     ]);
-    GenericBlockState {
+    BlockState {
         name: "minecraft:stone_button".into(),
         properties,
     }

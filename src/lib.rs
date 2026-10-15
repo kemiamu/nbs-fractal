@@ -12,7 +12,8 @@ pub mod schematic;
 mod tests;
 
 use rsnbs::note::{Instrument, Tone};
-use std::{borrow::Cow, collections::BTreeMap};
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
 
 /// Redstone tick (10 t/s).
 pub type RedStoneTick = rsnbs::types::Tick;
@@ -28,7 +29,7 @@ pub type GameTick = rsnbs::types::Tick;
 /// Properties stay sorted so equal states hash and compare alike, letting a
 /// state key a palette without a hand-written hash.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GenericBlockState {
+pub struct BlockState {
     /// The id of this block, e.g. `minecraft:air`.
     pub name: Cow<'static, str>,
 
@@ -36,7 +37,7 @@ pub struct GenericBlockState {
     pub properties: BTreeMap<Cow<'static, str>, Cow<'static, str>>,
 }
 
-impl GenericBlockState {
+impl BlockState {
     /// `minecraft:air`, the empty block state.
     pub fn air() -> Self {
         Self {
@@ -46,22 +47,22 @@ impl GenericBlockState {
     }
 }
 
-impl From<mcdata::GenericBlockState> for GenericBlockState {
+impl From<mcdata::GenericBlockState> for BlockState {
     /// Rebuilds a `mcdata` state into this crate's own sorted form.
     fn from(state: mcdata::GenericBlockState) -> Self {
         Self {
             name: state.name,
-            properties: state.properties.into_iter().collect(),
+            properties: BTreeMap::from_iter(state.properties),
         }
     }
 }
 
-impl From<GenericBlockState> for mcdata::GenericBlockState {
+impl From<BlockState> for mcdata::GenericBlockState {
     /// Rebuilds this crate's own state into a `mcdata` state.
-    fn from(state: GenericBlockState) -> Self {
+    fn from(state: BlockState) -> Self {
         Self {
             name: state.name,
-            properties: state.properties.into_iter().collect(),
+            properties: HashMap::from_iter(state.properties),
         }
     }
 }
