@@ -1,4 +1,4 @@
-use crate::schematic::Layout;
+use crate::layout::Layout;
 use counter::Counter;
 use ordered_float::OrderedFloat;
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
@@ -529,7 +529,7 @@ fn dump_litematic() {
 
 #[test]
 fn test_linear_layout() {
-    use crate::schematic::linear::MultiLinearLayout;
+    use crate::layout::linear::MultiLinearLayout;
 
     let song = Song::open_nbs("../rsnbs/fixtures/source.nbs").unwrap();
     let scale = (20.0 / song.header.tempo).round() as u32;

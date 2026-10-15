@@ -2,11 +2,11 @@ use clap::Parser;
 use itertools::Either;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
-use nbs_fractal::schematic::linear::{MultiLinearLayout, StackedLinearLayout};
-use nbs_fractal::schematic::{Layout, WithFloor, torrent::TorrentLayout};
+use nbs_fractal::layout::linear::{MultiLinearLayout, StackedLinearLayout};
+use nbs_fractal::layout::{Layout, WithFloor, torrent::TorrentLayout};
 #[allow(deprecated)]
-use nbs_fractal::schematic::{cascade::CascadeLayout, compact::MultiCompactLayout};
-use nbs_fractal::schematic::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
+use nbs_fractal::layout::{cascade::CascadeLayout, compact::MultiCompactLayout};
+use nbs_fractal::layout::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::{Layer, Song};
 use rsnbs::types::{Position, Tick, TimeAnchor};

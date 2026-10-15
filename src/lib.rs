@@ -1,10 +1,11 @@
 //! Fractal structures of NBS songs.
 //!
 //! This crate builds on [`rsnbs`]: [`analysis`] decomposes the note plane
-//! into translation equivalence classes, and [`schematic`] reconstructs
-//! Minecraft litematic projections from them.
+//! into translation equivalence classes, [`layout`] arranges the notes into
+//! projection layouts, and [`schematic`] writes them out as litematic files.
 
 pub mod analysis;
+pub mod layout;
 pub mod schematic;
 
 #[cfg(test)]
