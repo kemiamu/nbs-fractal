@@ -8,7 +8,7 @@ use mcdata::util::BlockPos;
 use rsnbs::note::{Note, Tone};
 use rsnbs::types::TimeAnchor;
 use rustmatica::Litematic;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::iter;
 
 // Layout: TorrentLayout
@@ -235,6 +235,16 @@ impl Layout for Linkage {
     fn size(&self) -> BlockPos {
         self.0.enclosing_size()
     }
+
+    /// The embedded projection's own palette, read straight back out.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        self.0.regions[0]
+            .block_palette()
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect()
+    }
 }
 
 /// One slice of the tunnel: the effective tracks it renders against, and the
@@ -259,8 +269,7 @@ impl Layout for Template<'_> {
 
         // z = 0: the drive row, one repeater on each track's centre.
         if pos.z == 0 {
-            let repeater = || repeater("1", Facing::South, false, false);
-            let drive = (lx == 0 && ly == 0).then_some(repeater());
+            let drive = (lx == 0 && ly == 0).then_some(drive_repeater());
             let scaffold = (lx == 0 && ly != 0).then_some(barrier());
             return drive.or(scaffold);
         }
@@ -295,6 +304,28 @@ impl Layout for Template<'_> {
     fn size(&self) -> BlockPos {
         BlockPos::new(99, 71, 2)
     }
+
+    /// The blocks a slice can draw: the fixed circuit row plus one note and one
+    /// instrument block per stored voice.
+    fn block_palette(&self) -> HashSet<GenericBlockState> {
+        use WireConn::{None as Open, Side};
+        let mut palette = HashSet::from([
+            drive_repeater(),
+            barrier(),
+            chain_block(),
+            wire_state(Open, Open, Side, Side, "0"),
+        ]);
+        for tone in self.slots.values() {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
+    }
+}
+
+/// The drive repeater that sets a track's note row going.
+fn drive_repeater() -> GenericBlockState {
+    repeater("1", Facing::South, false, false)
 }
 
 /// The barrier that scaffolds a track.
