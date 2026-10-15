@@ -14,7 +14,7 @@ use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cell::Cell, collections::HashMap};
 
-const DATA_VERSION: i32 = 2975;
+const MINECRAFT_DATA_VERSION: i32 = 2975;
 const VERSION: i32 = 6;
 const SUB_VERSION: i32 = 1;
 
@@ -22,7 +22,7 @@ const SUB_VERSION: i32 = 1;
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// The header of a written projection: its name, description, and author.
+/// The metadata of a written projection: its name, description, and author.
 pub struct Metadata<'a> {
     /// Name of the schematic and of its single region.
     pub name: &'a str,
@@ -43,57 +43,60 @@ pub(crate) fn write<L: Layout, W: Write>(
     metadata: Metadata,
     sink: W,
 ) -> io::Result<()> {
-    let solid = Cell::new(0i64);
-    let schematic = Schematic::new(layout, metadata, &solid)?;
+    let total_blocks = Cell::new(0i64);
+    let schematic = Schematic::new(layout, metadata, &total_blocks)?;
     let mut nbt = Nbt::new(GzEncoder::new(sink, Compression::default()));
     schematic.write(&mut nbt)?;
     nbt.into_inner().finish().map(|_| ())
 }
 
-/// The root litematic compound: one region and the header that describes it.
+/// The root litematic compound: one region and the metadata that describes it.
 struct Schematic<'a, L: Layout> {
     name: &'a str,
     region: RegionNbt<'a, L>,
-    header: Header<'a>,
+    metadata: Header<'a>,
 }
 
 impl<'a, L: Layout> Schematic<'a, L> {
     /// Assembles the projection around a palette discovered from `layout`.
-    fn new(layout: &'a L, metadata: Metadata<'a>, solid: &'a Cell<i64>) -> io::Result<Self> {
+    fn new(layout: &'a L, metadata: Metadata<'a>, total_blocks: &'a Cell<i64>) -> io::Result<Self> {
         let size = layout.size();
         let palette = Palette::from_iter(layout.block_palette());
-        let bits = palette.bits();
-        let total = u64::from(size.volume()) * u64::from(bits);
-        let words = i32::try_from(total.div_ceil(64)).map_err(|_| out_of_range("BlockStates"))?;
+        let num_bits = palette.num_bits();
+        let total = u64::from(size.volume()) * u64::from(num_bits);
+        let num_longs =
+            i32::try_from(total.div_ceil(64)).map_err(|_| out_of_range("BlockStates"))?;
+        let now = current_time();
         Ok(Self {
             name: metadata.name,
             region: RegionNbt {
                 layout,
                 palette,
                 size,
-                bits,
-                words,
-                solid,
+                num_bits,
+                num_longs,
+                total_blocks,
             },
-            header: Header {
+            metadata: Header {
                 metadata,
-                size,
-                solid,
-                time: current_time(),
+                enclosing_size: size,
+                total_blocks,
+                time_created: now,
+                time_modified: now,
             },
         })
     }
 
-    /// Writes the projection forward: the region, then the versions and header.
+    /// Writes the projection forward: the region, then the versions and metadata.
     fn write<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
         out.root()?;
         out.tag(Tag::Compound, "Regions")?;
         self.region.encode(self.name, out)?;
         out.end()?; // Regions
-        DATA_VERSION.encode("MinecraftDataVersion", out)?;
+        MINECRAFT_DATA_VERSION.encode("MinecraftDataVersion", out)?;
         VERSION.encode("Version", out)?;
         SUB_VERSION.encode("SubVersion", out)?;
-        self.header.encode("Metadata", out)?;
+        self.metadata.encode("Metadata", out)?;
         out.end() // root
     }
 }
@@ -103,9 +106,9 @@ struct RegionNbt<'a, L: Layout> {
     layout: &'a L,
     palette: Palette,
     size: BlockPos,
-    bits: u32,
-    words: i32,
-    solid: &'a Cell<i64>,
+    num_bits: u32,
+    num_longs: i32,
+    total_blocks: &'a Cell<i64>,
 }
 
 impl<L: Layout> Encode for RegionNbt<'_, L> {
@@ -114,44 +117,45 @@ impl<L: Layout> Encode for RegionNbt<'_, L> {
     fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
         BlockPos::ORIGIN.encode("Position", out)?;
         self.size.encode("Size", out)?;
-        self.palette.blocks.encode("BlockStatePalette", out)?;
-        let states = BlockStates {
+        self.palette.states.encode("BlockStatePalette", out)?;
+        let block_states = BlockStates {
             layout: self.layout,
             palette: &self.palette,
-            bits: self.bits,
-            words: self.words,
-            solid: self.solid,
+            num_bits: self.num_bits,
+            num_longs: self.num_longs,
+            total_blocks: self.total_blocks,
         };
-        states.encode("BlockStates", out)?;
+        block_states.encode("BlockStates", out)?;
         out.empty_list("TileEntities")?;
         out.end()
     }
 }
 
-/// The packed block states of a region: its words are pulled on demand.
+/// The packed block states of a region: its longs are pulled on demand.
 struct BlockStates<'a, L: Layout> {
     layout: &'a L,
     palette: &'a Palette,
-    bits: u32,
-    words: i32,
-    solid: &'a Cell<i64>,
+    num_bits: u32,
+    num_longs: i32,
+    total_blocks: &'a Cell<i64>,
 }
 
 impl<L: Layout> Encode for BlockStates<'_, L> {
     const TAG: Tag = Tag::LongArray;
 
     fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        let packed = Packed::new(self.layout, self.palette, self.bits, self.solid);
-        out.long_array(self.words, packed)
+        let packed = Packed::new(self.layout, self.palette, self.num_bits, self.total_blocks);
+        out.long_array(self.num_longs, packed)
     }
 }
 
 /// The metadata compound of a projection.
 struct Header<'a> {
     metadata: Metadata<'a>,
-    size: BlockPos,
-    solid: &'a Cell<i64>,
-    time: i64,
+    enclosing_size: BlockPos,
+    total_blocks: &'a Cell<i64>,
+    time_created: i64,
+    time_modified: i64,
 }
 
 impl Encode for Header<'_> {
@@ -162,48 +166,54 @@ impl Encode for Header<'_> {
         self.metadata.author.encode("Author", out)?;
         self.metadata.description.encode("Description", out)?;
         1i32.encode("RegionCount", out)?;
-        let volume = i32::try_from(self.size.volume()).map_err(|_| out_of_range("TotalVolume"))?;
-        volume.encode("TotalVolume", out)?;
-        self.solid.get().encode("TotalBlocks", out)?;
-        self.time.encode("TimeCreated", out)?;
-        self.time.encode("TimeModified", out)?;
-        self.size.encode("EnclosingSize", out)?;
+        let total_volume =
+            i32::try_from(self.enclosing_size.volume()).map_err(|_| out_of_range("TotalVolume"))?;
+        total_volume.encode("TotalVolume", out)?;
+        self.total_blocks.get().encode("TotalBlocks", out)?;
+        self.time_created.encode("TimeCreated", out)?;
+        self.time_modified.encode("TimeModified", out)?;
+        self.enclosing_size.encode("EnclosingSize", out)?;
         out.end()
     }
 }
 
-/// Packs palette ids into little-endian 64-bit words, one word per step, and
-/// counts the cells that are not air.
+/// Packs palette ids into little-endian 64-bit longs, one long per step, and
+/// counts the blocks that are not air.
 ///
-/// Each word is the low 64 bits of the accumulator, reinterpreted as a signed
+/// Each long is the low 64 bits of the accumulator, reinterpreted as a signed
 /// `i64`: the format stores raw two's-complement longs, so neither step is a
 /// numeric conversion.
 struct Packed<'a, L: Layout> {
     layout: &'a L,
     palette: &'a Palette,
     size: BlockPos,
-    bits: u32,
-    cell: u32,
-    cells: u32,
+    num_bits: u32,
+    index: u32,
+    volume: u32,
     acc: u128,
     have: u32,
-    solid: &'a Cell<i64>,
+    total_blocks: &'a Cell<i64>,
 }
 
 impl<'a, L: Layout> Packed<'a, L> {
-    /// Packs the ids `layout` yields through `palette`, `bits` apiece.
-    fn new(layout: &'a L, palette: &'a Palette, bits: u32, solid: &'a Cell<i64>) -> Self {
+    /// Packs the ids `layout` yields through `palette`, `num_bits` apiece.
+    fn new(
+        layout: &'a L,
+        palette: &'a Palette,
+        num_bits: u32,
+        total_blocks: &'a Cell<i64>,
+    ) -> Self {
         let size = layout.size();
         Self {
             layout,
             palette,
             size,
-            bits,
-            cell: 0,
-            cells: size.volume(),
+            num_bits,
+            index: 0,
+            volume: size.volume(),
             acc: 0,
             have: 0,
-            solid,
+            total_blocks,
         }
     }
 }
@@ -212,13 +222,16 @@ impl<L: Layout> Iterator for Packed<'_, L> {
     type Item = i64;
 
     fn next(&mut self) -> Option<i64> {
-        while self.have < 64 && self.cell < self.cells {
-            let block = self.layout.get_block_or_air(cell_pos(self.cell, self.size));
-            let id = self.palette.id_of(&block);
-            self.solid.set(self.solid.get() + i64::from(id != 0));
+        while self.have < 64 && self.index < self.volume {
+            let state = self
+                .layout
+                .get_block_or_air(index_to_pos(self.index, self.size));
+            let id = self.palette.id_of(&state);
+            self.total_blocks
+                .set(self.total_blocks.get() + i64::from(id != 0));
             self.acc |= u128::try_from(id).expect("palette id fits in u128") << self.have;
-            self.have += self.bits;
-            self.cell += 1;
+            self.have += self.num_bits;
+            self.index += 1;
         }
         if self.have == 0 {
             return None;
@@ -230,12 +243,12 @@ impl<L: Layout> Iterator for Packed<'_, L> {
     }
 }
 
-/// The position of the `index`-th cell of `size`, in writing order: `x` fastest,
-/// then `z`, then `y`.
+/// The position of index `index` in `size`, in writing order: `x` fastest, then
+/// `z`, then `y`.
 ///
 /// Sizes are non-negative, so every coordinate lies inside the box and thus
 /// fits the `i32` a [`BlockPos`] is made of.
-fn cell_pos(index: u32, size: BlockPos) -> BlockPos {
+fn index_to_pos(index: u32, size: BlockPos) -> BlockPos {
     let (sx, sz) = (size.x.unsigned_abs(), size.z.unsigned_abs());
     let (x, rest) = (index % sx, index / sx);
     BlockPos::new(
@@ -258,47 +271,47 @@ fn current_time() -> i64 {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Distinct block states in first-seen order, with a map from state to id so a
-/// cell resolves without a scan.
+/// Distinct block states, air first then the rest ascending, with a map from
+/// state to id so a position resolves without a scan.
 struct Palette {
-    blocks: Vec<BlockState>,
+    states: Vec<BlockState>,
     ids: HashMap<BlockState, usize>,
 }
 
 impl Palette {
-    /// Collects `blocks` into a palette ordered canonically: air first, then the
+    /// Collects `states` into a palette ordered canonically: air first, then the
     /// rest ascending, so the ids stay fixed whatever order the set iterates in.
-    fn from_iter<I: IntoIterator<Item = BlockState>>(blocks: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = BlockState>>(states: I) -> Self {
         let air = BlockState::air();
-        let mut blocks: Vec<BlockState> =
-            blocks.into_iter().filter(|block| block != &air).collect();
-        blocks.sort();
-        blocks.dedup();
-        blocks.insert(0, air);
-        let ids: HashMap<BlockState, usize> = blocks
+        let mut states: Vec<BlockState> =
+            states.into_iter().filter(|state| state != &air).collect();
+        states.sort();
+        states.dedup();
+        states.insert(0, air);
+        let ids: HashMap<BlockState, usize> = states
             .iter()
             .cloned()
             .enumerate()
-            .map(|(id, block)| (block, id))
+            .map(|(id, state)| (state, id))
             .collect();
-        Self { blocks, ids }
+        Self { states, ids }
     }
 
-    /// The id of `block`, which this palette is contracted to contain.
-    fn id_of(&self, block: &BlockState) -> usize {
+    /// The id of `state`, which this palette is contracted to contain.
+    fn id_of(&self, state: &BlockState) -> usize {
         self.ids
-            .get(block)
+            .get(state)
             .copied()
             .expect("block_palette must cover every block the region emits")
     }
 
-    /// Bits per cell: the least that still names every palette entry, at least two.
-    fn bits(&self) -> u32 {
-        let mut bits = 2;
-        while (1usize << bits) < self.blocks.len() {
-            bits += 1;
+    /// Bits per position: the least that names every palette entry, at least two.
+    fn num_bits(&self) -> u32 {
+        let mut num_bits = 2;
+        while (1usize << num_bits) < self.states.len() {
+            num_bits += 1;
         }
-        bits
+        num_bits
     }
 }
 
@@ -484,15 +497,15 @@ mod nbt {
             self.list(Tag::End, 0)
         }
 
-        /// Writes a `TAG_Long_Array` payload, word by word, so it is never held whole.
+        /// Writes a `TAG_Long_Array` payload, long by long, so it is never held whole.
         pub(super) fn long_array<I: Iterator<Item = i64>>(
             &mut self,
             len: i32,
-            words: I,
+            longs: I,
         ) -> io::Result<()> {
             self.out.write_all(&len.to_be_bytes())?;
-            for word in words {
-                self.out.write_all(&word.to_be_bytes())?;
+            for long in longs {
+                self.out.write_all(&long.to_be_bytes())?;
             }
             Ok(())
         }
