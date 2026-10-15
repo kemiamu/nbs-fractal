@@ -1,56 +1,27 @@
 //! Streaming litematic writer.
 //!
-//! Writes any declarative [`Region`] of blocks into the litematic format as a
+//! Writes any declarative [`Layout`] of blocks into the litematic format as a
 //! forward-only stream, so memory holds only the palette rather than the whole
 //! projection. The schema is a tree of types that write themselves, so the
 //! writer learns nothing of a caller beyond its bounding box and its palette.
 
 use self::encode::Encode;
 use self::nbt::{Nbt, Tag};
+use crate::layout::Layout;
 use flate2::{Compression, write::GzEncoder};
-use itertools::iproduct;
 use mcdata::{BlockState, GenericBlockState, util::BlockPos};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{cell::Cell, collections::HashMap, iter};
+use std::{cell::Cell, collections::HashMap};
 
 const DATA_VERSION: i32 = 2975;
 const VERSION: i32 = 6;
 const SUB_VERSION: i32 = 1;
 
-// Region & Metadata
+// Metadata
 //
 // ++++++++++++============++++++++++++============++++++++++++============
-
-/// A declarative block source: a bounding box and the block at each cell.
-///
-/// This is the whole interface the writer needs: give it a size and a block per
-/// cell and it writes a projection, with no knowledge of how they were arranged.
-pub trait Region {
-    /// Bounding box size, in blocks.
-    fn size(&self) -> BlockPos;
-
-    /// Block at the given in-bounds position; `None` is air.
-    fn get_block(&self, pos: BlockPos) -> Option<GenericBlockState>;
-
-    /// The palette the region draws on: every distinct block it can emit, air
-    /// first, in first-seen writing order.
-    ///
-    /// A region that already knows its palette declares it here to spare the
-    /// writer a discovery pass; the default walks [`get_block`](Self::get_block)
-    /// over the whole box.
-    fn block_palette(&self) -> impl Iterator<Item = GenericBlockState> + '_ {
-        let size = self.size();
-        let cell = |(y, z, x)| {
-            let block = self.get_block(BlockPos::new(x, y, z));
-            block.unwrap_or_else(GenericBlockState::air)
-        };
-        let cells = iproduct!(0..size.y, 0..size.z, 0..size.x).map(cell);
-        let declared = iter::once(GenericBlockState::air()).chain(cells);
-        Palette::from_iter(declared).blocks.into_iter()
-    }
-}
 
 /// The header of a written projection: its name, description, and author.
 pub struct Metadata<'a> {
@@ -66,35 +37,39 @@ pub struct Metadata<'a> {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Writes `region` to `sink` as a gzip-compressed litematic projection.
-pub fn save<R: Region, W: Write>(region: &R, metadata: Metadata, sink: W) -> io::Result<()> {
+/// Writes `layout` to `sink` as a gzip-compressed litematic projection,
+/// described by `metadata`.
+pub(crate) fn write<L: Layout, W: Write>(
+    layout: &L,
+    metadata: Metadata,
+    sink: W,
+) -> io::Result<()> {
     let solid = Cell::new(0i64);
-    let schematic = Schematic::new(region, metadata, &solid)?;
+    let schematic = Schematic::new(layout, metadata, &solid)?;
     let mut nbt = Nbt::new(GzEncoder::new(sink, Compression::default()));
     schematic.write(&mut nbt)?;
-    nbt.into_inner().finish()?;
-    Ok(())
+    nbt.into_inner().finish().map(|_| ())
 }
 
 /// The root litematic compound: one region and the header that describes it.
-struct Schematic<'a, R: Region> {
+struct Schematic<'a, L: Layout> {
     name: &'a str,
-    region: RegionNbt<'a, R>,
+    region: RegionNbt<'a, L>,
     header: Header<'a>,
 }
 
-impl<'a, R: Region> Schematic<'a, R> {
-    /// Assembles the projection around a palette discovered from `region`.
-    fn new(region: &'a R, metadata: Metadata<'a>, solid: &'a Cell<i64>) -> io::Result<Self> {
-        let size = region.size();
-        let palette = Palette::from_iter(region.block_palette());
+impl<'a, L: Layout> Schematic<'a, L> {
+    /// Assembles the projection around a palette discovered from `layout`.
+    fn new(layout: &'a L, metadata: Metadata<'a>, solid: &'a Cell<i64>) -> io::Result<Self> {
+        let size = layout.size();
+        let palette = Palette::from_iter(layout.block_palette());
         let bits = palette.bits();
         let total = u64::from(size.volume()) * u64::from(bits);
         let words = i32::try_from(total.div_ceil(64)).map_err(|_| out_of_range("BlockStates"))?;
         Ok(Self {
             name: metadata.name,
             region: RegionNbt {
-                region,
+                layout,
                 palette,
                 size,
                 bits,
@@ -125,8 +100,8 @@ impl<'a, R: Region> Schematic<'a, R> {
 }
 
 /// One region: its box, its palette, and its block states.
-struct RegionNbt<'a, R: Region> {
-    region: &'a R,
+struct RegionNbt<'a, L: Layout> {
+    layout: &'a L,
     palette: Palette,
     size: BlockPos,
     bits: u32,
@@ -134,7 +109,7 @@ struct RegionNbt<'a, R: Region> {
     solid: &'a Cell<i64>,
 }
 
-impl<R: Region> Encode for RegionNbt<'_, R> {
+impl<L: Layout> Encode for RegionNbt<'_, L> {
     const TAG: Tag = Tag::Compound;
 
     fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
@@ -142,7 +117,7 @@ impl<R: Region> Encode for RegionNbt<'_, R> {
         self.size.encode("Size", out)?;
         self.palette.blocks.encode("BlockStatePalette", out)?;
         let states = BlockStates {
-            region: self.region,
+            layout: self.layout,
             palette: &self.palette,
             bits: self.bits,
             words: self.words,
@@ -155,19 +130,19 @@ impl<R: Region> Encode for RegionNbt<'_, R> {
 }
 
 /// The packed block states of a region: its words are pulled on demand.
-struct BlockStates<'a, R: Region> {
-    region: &'a R,
+struct BlockStates<'a, L: Layout> {
+    layout: &'a L,
     palette: &'a Palette,
     bits: u32,
     words: i32,
     solid: &'a Cell<i64>,
 }
 
-impl<R: Region> Encode for BlockStates<'_, R> {
+impl<L: Layout> Encode for BlockStates<'_, L> {
     const TAG: Tag = Tag::LongArray;
 
     fn body<W: Write>(&self, out: &mut Nbt<W>) -> io::Result<()> {
-        let packed = Packed::new(self.region, self.palette, self.bits, self.solid);
+        let packed = Packed::new(self.layout, self.palette, self.bits, self.solid);
         out.long_array(self.words, packed)
     }
 }
@@ -204,8 +179,8 @@ impl Encode for Header<'_> {
 /// Each word is the low 64 bits of the accumulator, reinterpreted as a signed
 /// `i64`: the format stores raw two's-complement longs, so neither step is a
 /// numeric conversion.
-struct Packed<'a, R: Region> {
-    region: &'a R,
+struct Packed<'a, L: Layout> {
+    layout: &'a L,
     palette: &'a Palette,
     size: BlockPos,
     bits: u32,
@@ -216,12 +191,12 @@ struct Packed<'a, R: Region> {
     solid: &'a Cell<i64>,
 }
 
-impl<'a, R: Region> Packed<'a, R> {
-    /// Packs the ids `region` yields through `palette`, `bits` apiece.
-    fn new(region: &'a R, palette: &'a Palette, bits: u32, solid: &'a Cell<i64>) -> Self {
-        let size = region.size();
+impl<'a, L: Layout> Packed<'a, L> {
+    /// Packs the ids `layout` yields through `palette`, `bits` apiece.
+    fn new(layout: &'a L, palette: &'a Palette, bits: u32, solid: &'a Cell<i64>) -> Self {
+        let size = layout.size();
         Self {
-            region,
+            layout,
             palette,
             size,
             bits,
@@ -234,13 +209,13 @@ impl<'a, R: Region> Packed<'a, R> {
     }
 }
 
-impl<R: Region> Iterator for Packed<'_, R> {
+impl<L: Layout> Iterator for Packed<'_, L> {
     type Item = i64;
 
     fn next(&mut self) -> Option<i64> {
         while self.have < 64 && self.cell < self.cells {
             let block = self
-                .region
+                .layout
                 .get_block(cell_pos(self.cell, self.size))
                 .unwrap_or_else(GenericBlockState::air);
             let id = self.palette.id_of(&block);

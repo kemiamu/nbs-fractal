@@ -4,6 +4,7 @@ use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::Song;
 use rsnbs::types::{LayerAnchor, Position, Tick, TimeAnchor};
 
+use crate::layout::Layout;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::{iter::repeat, num::NonZero};
 
@@ -552,7 +553,7 @@ fn test_linear_layout() {
         author: "rustnbs",
     };
     let file = std::fs::File::create("../rsnbs/fixtures/generated_linear.litematic").unwrap();
-    crate::schematic::save(&layout, metadata, file).unwrap();
+    layout.as_litematic(metadata, file).unwrap();
 }
 
 #[test]

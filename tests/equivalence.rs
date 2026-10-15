@@ -3,7 +3,7 @@
 use itertools::iproduct;
 use mcdata::{BlockState, GenericBlockState, util::BlockPos};
 use nbs_fractal::layout::Layout;
-use nbs_fractal::schematic::{self, Metadata};
+use nbs_fractal::schematic::Metadata;
 use rustmatica::{Litematic, Region};
 use std::io::Read;
 
@@ -50,7 +50,7 @@ impl Layout for Sample {
 
 /// The reference bytes, built the way the old in-memory path built them.
 fn reference(layout: &Sample) -> Vec<u8> {
-    let size = layout.size();
+    let size = Layout::size(layout);
     let mut region: Region<GenericBlockState> = Region::new(NAME, BlockPos::ORIGIN, size);
     for (y, z, x) in iproduct!(0..size.y, 0..size.z, 0..size.x) {
         let pos = BlockPos::new(x, y, z);
@@ -71,7 +71,7 @@ fn written(layout: &Sample) -> Vec<u8> {
         description: "Equivalence",
         author: "nbs-fractal",
     };
-    schematic::save(layout, metadata, &mut bytes).unwrap();
+    layout.as_litematic(metadata, &mut bytes).unwrap();
     bytes
 }
 

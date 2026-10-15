@@ -7,7 +7,7 @@ use nbs_fractal::layout::{Layout, WithFloor, torrent::TorrentLayout};
 #[allow(deprecated)]
 use nbs_fractal::layout::{cascade::CascadeLayout, compact::MultiCompactLayout};
 use nbs_fractal::layout::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
-use nbs_fractal::schematic::{self, Metadata};
+use nbs_fractal::schematic::Metadata;
 use rsnbs::note::{Note, NoteStreamExt, Notes, Tone};
 use rsnbs::song::{Layer, Song};
 use rsnbs::types::{Position, Tick, TimeAnchor};
@@ -558,8 +558,8 @@ fn write_schematic<L: Layout>(layout: L, floor: Floor, description: String, outp
     ensure_parent(output);
     let file = File::create(output).unwrap();
     match floor {
-        Floor::None => schematic::save(&layout, metadata, file),
-        _ => schematic::save(&WithFloor::new(layout, floor.full()), metadata, file),
+        Floor::None => layout.as_litematic(metadata, file),
+        _ => WithFloor::new(layout, floor.full()).as_litematic(metadata, file),
     }
     .unwrap();
     eprintln!("Wrote {output}");

@@ -26,7 +26,7 @@ const AXIS_Y: i32 = 46;
 
 /// Every note block in `layout`, ordered by ascending z.
 fn placed(layout: &impl Layout) -> Vec<BlockPos> {
-    let size = layout.size();
+    let size = Layout::size(layout);
     let mut found = Vec::new();
     for z in 0..size.z {
         for y in 0..size.y {
@@ -126,7 +126,7 @@ fn sweep_all_panning_and_volume() {
     };
     std::fs::create_dir_all("out").ok();
     let file = std::fs::File::create("out/torrent_pan_volume.litematic").unwrap();
-    nbs_fractal::schematic::save(&layout, metadata, file).unwrap();
+    layout.as_litematic(metadata, file).unwrap();
 }
 
 #[test]

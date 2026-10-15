@@ -1,6 +1,10 @@
 //! Projection layouts: the note-to-block arrangement a song projects into.
 
+use crate::schematic::{self, Metadata};
+use itertools::iproduct;
 use mcdata::{BlockState, GenericBlockState, util::BlockPos};
+use std::io::{self, Write};
+use std::iter;
 
 pub mod blocks;
 pub mod cascade;
@@ -15,6 +19,11 @@ pub mod torrent;
 // ++++++++++++============++++++++++++============++++++++++++============
 
 /// A queryable projection layout.
+///
+/// This is the whole interface the writer needs: a bounding box, the block at
+/// each cell, and the palette the layout draws on. It also carries the single
+/// output operation, [`as_litematic`](Self::as_litematic), so a layout can be
+/// written out with nothing else in scope.
 pub trait Layout {
     /// Block at the given world position, assumed to be in bounds.
     fn block_at(&self, pos: BlockPos) -> Option<GenericBlockState>;
@@ -40,6 +49,34 @@ pub trait Layout {
     fn contains(&self, pos: BlockPos) -> bool {
         let size = self.size();
         (0..size.x).contains(&pos.x) && (0..size.y).contains(&pos.y) && (0..size.z).contains(&pos.z)
+    }
+
+    /// The palette the layout draws on: every block it can emit, air first.
+    ///
+    /// A layout that already knows its palette declares it here to spare the
+    /// writer a discovery pass; the default walks [`get_block`](Self::get_block)
+    /// over the whole box. Repeats are allowed, since the writer keeps only the
+    /// first occurrence of each block and preserves that first-seen order.
+    fn block_palette(&self) -> impl Iterator<Item = GenericBlockState> + '_
+    where
+        Self: Sized,
+    {
+        let size = self.size();
+        let cell = |(y, z, x)| {
+            let block = self.get_block(BlockPos::new(x, y, z));
+            block.unwrap_or_else(GenericBlockState::air)
+        };
+        let cells = iproduct!(0..size.y, 0..size.z, 0..size.x).map(cell);
+        iter::once(GenericBlockState::air()).chain(cells)
+    }
+
+    /// Writes this layout to `sink` as a gzip-compressed litematic projection,
+    /// described by `metadata`.
+    fn as_litematic<W: Write>(&self, metadata: Metadata, sink: W) -> io::Result<()>
+    where
+        Self: Sized,
+    {
+        schematic::write(self, metadata, sink)
     }
 }
 
@@ -80,6 +117,10 @@ impl<T: AsLayout> Layout for T {
 
     fn size(&self) -> BlockPos {
         self.as_layout().size()
+    }
+
+    fn block_palette(&self) -> impl Iterator<Item = GenericBlockState> + '_ {
+        self.as_layout().block_palette()
     }
 }
 
