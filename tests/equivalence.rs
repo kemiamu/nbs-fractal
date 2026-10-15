@@ -1,11 +1,11 @@
 //! The streaming writer must reproduce the rustmatica reference projection.
 
 use itertools::iproduct;
-use mcdata::{BlockState as _, util::BlockPos};
+use mcdata::util::BlockPos;
 use nbs_fractal::BlockState;
 use nbs_fractal::layout::Layout;
 use nbs_fractal::schematic::Metadata;
-use rustmatica::{Litematic, Region};
+use rustmatica::Litematic;
 
 const NAME: &str = "Note Block Track Schematic";
 
@@ -48,28 +48,25 @@ impl Layout for Sample {
     }
 }
 
-/// The reference bytes, built the way the old in-memory path built them.
-fn reference(layout: &Sample) -> Vec<u8> {
-    let size = Layout::size(layout);
-    let mut region: Region<mcdata::GenericBlockState> = Region::new(NAME, BlockPos::ORIGIN, size);
-    for (y, z, x) in iproduct!(0..size.y, 0..size.z, 0..size.x) {
-        let pos = BlockPos::new(x, y, z);
-        let state = layout.block_at(pos).map(Into::into);
-        region.set_block(pos, state.unwrap_or_else(mcdata::GenericBlockState::air));
+/// The metadata both paths are given.
+fn metadata() -> Metadata<'static> {
+    Metadata {
+        name: NAME,
+        description: "Equivalence",
+        author: "nbs-fractal",
     }
-    let litematic: Litematic = region.as_litematic("Equivalence", "nbs-fractal");
-    litematic.to_bytes().unwrap()
+}
+
+/// The bytes the old in-memory path produces.
+#[allow(deprecated)]
+fn reference(layout: &Sample) -> Vec<u8> {
+    layout.as_rustmatica(metadata()).to_bytes().unwrap()
 }
 
 /// The bytes the streaming writer produces.
 fn written(layout: &Sample) -> Vec<u8> {
     let mut bytes = Vec::new();
-    let metadata = Metadata {
-        name: NAME,
-        description: "Equivalence",
-        author: "nbs-fractal",
-    };
-    layout.as_litematic(metadata, &mut bytes).unwrap();
+    layout.as_litematic(metadata(), &mut bytes).unwrap();
     bytes
 }
 

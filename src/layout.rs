@@ -4,6 +4,7 @@ use crate::BlockState;
 use crate::schematic::{self, Metadata};
 use itertools::iproduct;
 use mcdata::util::BlockPos;
+use rustmatica::{Litematic, Region};
 use std::collections::HashSet;
 use std::io::{self, Write};
 
@@ -22,9 +23,10 @@ pub mod torrent;
 /// A queryable projection layout.
 ///
 /// This is the whole interface the writer needs: a bounding box, the block at
-/// each cell, and the palette the layout draws on. It also carries the single
-/// output operation, [`as_litematic`](Self::as_litematic), so a layout can be
-/// written out with nothing else in scope.
+/// each cell, and the palette the layout draws on. It also carries the output
+/// operations, [`as_litematic`](Self::as_litematic) for the streaming writer and
+/// the deprecated [`as_rustmatica`](Self::as_rustmatica) for the old path, so a
+/// layout can be written out with nothing else in scope.
 pub trait Layout {
     /// Block at the given world position, assumed to be in bounds.
     fn block_at(&self, pos: BlockPos) -> Option<BlockState>;
@@ -83,6 +85,28 @@ pub trait Layout {
         Self: Sized,
     {
         schematic::write(self, metadata, sink)
+    }
+
+    /// Builds this layout as a `rustmatica` litematic, described by `metadata`.
+    ///
+    /// The old in-memory path: the whole projection is materialized before it is
+    /// written, so a full song costs gigabytes. It stays only to check the
+    /// streaming writer against it.
+    #[deprecated(note = "materializes the whole projection; use `as_litematic`")]
+    fn as_rustmatica(&self, metadata: Metadata) -> Litematic
+    where
+        Self: Sized,
+    {
+        let size = self.size();
+        let mut region = Region::new(metadata.name.to_string(), BlockPos::ORIGIN, size);
+        for (y, z, x) in iproduct!(0..size.y, 0..size.z, 0..size.x) {
+            let pos = BlockPos::new(x, y, z);
+            region.set_block(pos, self.get_block_or_air(pos).into());
+        }
+        region.as_litematic(
+            metadata.description.to_string(),
+            metadata.author.to_string(),
+        )
     }
 }
 
