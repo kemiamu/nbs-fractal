@@ -1,8 +1,8 @@
 //! Fishbone layout for NBS song projection.
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
-use super::{EvenlyArranged, Layout, air, forward_layout};
-use crate::BlockState;
+use super::{EvenlyArranged, Layout, air};
+use crate::{BlockState, forward_layout};
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use rsnbs::types::{Tick, TimeAnchor};
@@ -121,7 +121,7 @@ impl Template {
 }
 
 impl<Ctx> Layout<Ctx> for Template {
-    fn block_at(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         use Facing::{East, South};
         use WireConn::{None as Air, Side};
         let g = pos.x as usize / 2;
@@ -159,13 +159,13 @@ impl<Ctx> Layout<Ctx> for Template {
         main(pos.y).or_else(|| branch(pos.y))
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         BlockPos::new(8, 2, 3)
     }
 
     /// The blocks a cell can draw: the spine and clock pass-through, one rib per
     /// group, and one note and instrument block per stored tone.
-    fn block_palette(&self, _ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{East, South};
         use WireConn::{None as Open, Side};
         let mut palette = HashSet::from([

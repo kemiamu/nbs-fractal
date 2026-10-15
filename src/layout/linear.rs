@@ -2,8 +2,8 @@
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater};
 use super::blocks::{redstone_block, sticky_piston, wire_state};
-use super::{Clipped, EvenlyArranged, Layout, Overlaid, Provided, WithFloor, air, forward_layout};
-use crate::BlockState;
+use super::{Clipped, EvenlyArranged, Layout, Overlaid, Provided, WithFloor, air};
+use crate::{BlockState, forward_layout};
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use rsnbs::types::{Tick, TimeAnchor};
@@ -161,7 +161,7 @@ impl Row {
         };
         let cells = EvenlyArranged::new(templates, pitch, &frame);
         let turn = Turn::new(leading_turn);
-        let size = BlockPos::new(width, cells.size(&frame).y, depth);
+        let size = BlockPos::new(width, cells.size_with(&frame).y, depth);
         let turn_anchor = BlockPos::new(0, 0, if south_bound { 0 } else { -1 });
         let cells_anchor = BlockPos::new(-1, 0, if south_bound { 1 } else { -2 });
         let inner = Overlaid::new(turn_anchor, turn, cells_anchor, cells, size, &frame);
@@ -378,7 +378,7 @@ impl Template {
 }
 
 impl Layout<Frame> for Template {
-    fn block_at(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
         use self::{Branch::*, Facing::*};
         let south_bound = frame.south_bound;
         let local_z = if south_bound { pos.z } else { 2 - pos.z };
@@ -419,13 +419,13 @@ impl Layout<Frame> for Template {
         }
     }
 
-    fn size(&self, frame: &Frame) -> BlockPos {
+    fn size_with(&self, frame: &Frame) -> BlockPos {
         BlockPos::new(frame.scale.width(), 2, 3)
     }
 
     /// The blocks a cell can draw: its fixed circuit row, the branch hardware its
     /// shape calls for, and one note and instrument block per stored tone.
-    fn block_palette(&self, frame: &Frame) -> HashSet<BlockState> {
+    fn block_palette_with(&self, frame: &Frame) -> HashSet<BlockState> {
         use Facing::{North, South};
         let facing = match frame.south_bound {
             true => South,
@@ -467,7 +467,7 @@ impl Turn {
 }
 
 impl Layout<Frame> for Turn {
-    fn block_at(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
         use self::WireConn::*;
         if !self.connected {
             return Option::None;
@@ -481,12 +481,12 @@ impl Layout<Frame> for Turn {
         }
     }
 
-    fn size(&self, frame: &Frame) -> BlockPos {
+    fn size_with(&self, frame: &Frame) -> BlockPos {
         BlockPos::new(frame.width, 2, 1)
     }
 
     /// The blocks a turn can draw: its connector wires and the chain it rides on.
-    fn block_palette(&self, _frame: &Frame) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _frame: &Frame) -> HashSet<BlockState> {
         if !self.connected {
             return HashSet::new();
         }

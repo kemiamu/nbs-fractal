@@ -2,7 +2,7 @@
 
 use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, observer};
 use super::blocks::{redstone_torch, redstone_wire, repeater, wire_state};
-use super::{Arranged, Axis, EdgeArranged, Layout, WithFloor, compact::CompactLayout};
+use super::{Arranged, Axis, EdgeArranged, Layout, LayoutExt, WithFloor, compact::CompactLayout};
 use crate::{BlockState, RedStoneTick, analysis::BoundedTec};
 use mcdata::util::BlockPos;
 use rsnbs::note::{Instrument, Key, Tone};
@@ -69,8 +69,8 @@ impl TappedLayout {
         let playing = Arranged::new(layouts, Axis::Elevation, 0, &());
 
         // composite bounding box
-        let ctrl_size = control.size(&());
-        let play_size = playing.size(&());
+        let ctrl_size = control.size();
+        let play_size = playing.size();
         let size = BlockPos::new(
             ctrl_size.x + play_size.x,
             ctrl_size.y.max(play_size.y),
@@ -86,29 +86,29 @@ impl TappedLayout {
 }
 
 impl Layout<()> for TappedLayout {
-    fn block_at(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
-        let divide = self.control.size(&()).x;
+    fn block_at_with(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
+        let divide = self.control.size().x;
         let side = pos.x < divide;
 
         let (local, size) = match side {
-            true => (pos, self.control.size(&())),
-            false => (pos - BlockPos::new(divide, 0, 0), self.playing.size(&())),
+            true => (pos, self.control.size()),
+            false => (pos - BlockPos::new(divide, 0, 0), self.playing.size()),
         };
         let dispatch = || match side {
-            true => self.control.get_block(local, &()),
-            false => self.playing.get_block(local, &()),
+            true => self.control.get_block(local),
+            false => self.playing.get_block(local),
         };
         (local.y < size.y && local.z < size.z).then(dispatch)?
     }
 
-    fn size(&self, _ctx: &()) -> BlockPos {
+    fn size_with(&self, _ctx: &()) -> BlockPos {
         self.size
     }
 
     /// The control lines and the playing units together.
-    fn block_palette(&self, _ctx: &()) -> HashSet<BlockState> {
-        let mut palette = self.control.block_palette(&());
-        palette.extend(self.playing.block_palette(&()));
+    fn block_palette_with(&self, _ctx: &()) -> HashSet<BlockState> {
+        let mut palette = self.control.block_palette();
+        palette.extend(self.playing.block_palette());
         palette
     }
 }
@@ -139,7 +139,7 @@ impl TapLine {
             Some(Tap::new(NonZero::new(diff).unwrap(), repeater_coarse))
         });
         let delays = EdgeArranged::new(taps, Axis::Southing, 0, Axis::Easting.unit(), &());
-        let inner = delays.size(&());
+        let inner = delays.size();
         let width = inner.x.max(if switch { 5 } else { 2 });
         let size = BlockPos::new(width, Tap::ELEVATION, inner.z + 1);
         let anchor = BlockPos::new(width - inner.x, 0, 1);
@@ -197,21 +197,21 @@ impl TapLine {
 }
 
 impl<Ctx> Layout<Ctx> for TapLine {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         match pos.z == 0 {
             true => self.port(pos),
-            false => self.delays.try_get_block(pos - self.anchor, ctx),
+            false => self.delays.try_get_block_with(pos - self.anchor, ctx),
         }
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         self.size
     }
 
     /// The port's fixed hardware, plus every delay element's palette.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
         let mut palette = self.port_palette();
-        palette.extend(self.delays.block_palette(ctx));
+        palette.extend(self.delays.block_palette_with(ctx));
         palette
     }
 }
@@ -249,7 +249,7 @@ impl Tap {
 }
 
 impl<Ctx> Layout<Ctx> for Tap {
-    fn block_at(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         use WireConn::*;
         let rev_easting = self.size.x - pos.x - 1;
         let delay = self.delay.get();
@@ -277,13 +277,13 @@ impl<Ctx> Layout<Ctx> for Tap {
         }
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         self.size
     }
 
     /// The blocks a delay element can draw: its chain, torches, repeaters and the
     /// wire links that carry its tapped delay.
-    fn block_palette(&self, _ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{East, North, West};
         use WireConn::{None as Open, Side};
         let delay = self.delay.get();

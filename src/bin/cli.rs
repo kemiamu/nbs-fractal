@@ -3,7 +3,7 @@ use itertools::Either;
 use nbs_fractal::analysis::reuse::{plan_to_tecs, reuse_flow};
 use nbs_fractal::analysis::{BoundedTec, TePlane, TransEqClass};
 use nbs_fractal::layout::linear::{MultiLinearLayout, StackedLinearLayout};
-use nbs_fractal::layout::{AsLitematic, Layout, WithFloor, torrent::TorrentLayout};
+use nbs_fractal::layout::{LayoutExt, WithFloor, torrent::TorrentLayout};
 #[allow(deprecated)]
 use nbs_fractal::layout::{cascade::CascadeLayout, compact::MultiCompactLayout};
 use nbs_fractal::layout::{fishbone::MultiFishboneLayout, tapped::TappedLayout};
@@ -546,7 +546,7 @@ impl Tapped {
 
 /// Writes the layout as a streaming litematic projection, wrapping the layout in
 /// a floor platform when requested, and reports it.
-fn write_schematic<L: Layout>(layout: L, floor: Floor, description: String, output: &str) {
+fn write_schematic<L: LayoutExt>(layout: L, floor: Floor, description: String, output: &str) {
     const NAME: &str = "Note Block Track Schematic";
     const AUTHOR: &str = "nbs-fractal";
     let metadata = Metadata {

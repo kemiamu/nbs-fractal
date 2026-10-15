@@ -28,50 +28,52 @@ pub mod torrent;
 /// layout whose context is erased implements `Layout<()>`, the context of the
 /// writer and of every finished layout.
 ///
-/// This is the whole interface the writer needs: a bounding box, the block at
-/// each cell, and the palette the layout draws on.
+/// Every query is named `*_with` and reads a borrow of `Ctx`. A layout whose
+/// context is `()` gets the plain queries and the projection materialization of
+/// [`LayoutExt`] for free, so a finished layout reads as `layout.size()`.
 pub trait Layout<Ctx = ()> {
-    /// Block at the given world position, assumed to be in bounds.
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState>;
+    /// Block at the given world position, read within `ctx`, assumed in bounds.
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState>;
 
-    /// Total size of the bounding box.
-    fn size(&self, ctx: &Ctx) -> BlockPos;
+    /// Total size of the bounding box, read within `ctx`.
+    fn size_with(&self, ctx: &Ctx) -> BlockPos;
 
     /// Block at the given world position; panics on out-of-bounds access.
-    fn get_block(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        debug_assert!(self.contains(pos, ctx), "block out of bounds: {pos:?}");
-        self.block_at(pos, ctx)
+    fn get_block_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+        debug_assert!(self.contains_with(pos, ctx), "block out of bounds: {pos:?}");
+        self.block_at_with(pos, ctx)
     }
 
     /// Block at the given world position; `None` when it misses the bounding box.
-    fn try_get_block(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        match self.contains(pos, ctx) {
-            true => self.block_at(pos, ctx),
+    fn try_get_block_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+        match self.contains_with(pos, ctx) {
+            true => self.block_at_with(pos, ctx),
             false => None,
         }
     }
 
     /// Block at the given world position, or air where the layout is empty.
-    fn get_block_or_air(&self, pos: BlockPos, ctx: &Ctx) -> BlockState {
-        self.get_block(pos, ctx).unwrap_or_else(air)
+    fn get_block_or_air_with(&self, pos: BlockPos, ctx: &Ctx) -> BlockState {
+        self.get_block_with(pos, ctx).unwrap_or_else(air)
     }
 
     /// Whether `pos` is inside the bounding box.
-    fn contains(&self, pos: BlockPos, ctx: &Ctx) -> bool {
-        let size = self.size(ctx);
+    fn contains_with(&self, pos: BlockPos, ctx: &Ctx) -> bool {
+        let size = self.size_with(ctx);
         (0..size.x).contains(&pos.x) && (0..size.y).contains(&pos.y) && (0..size.z).contains(&pos.z)
     }
 
     /// The block states this instance owns: a set containing every state that
-    /// [`block_at`](Self::block_at) can return, empty cells counted as air.
+    /// [`block_at_with`](Self::block_at_with) can return, empty cells counted as
+    /// air.
     ///
     /// A layout may over-approximate, so declaring it spares the writer a
     /// whole-box discovery walk; the default does exactly that walk via
-    /// [`get_block_or_air`](Self::get_block_or_air). The writer alone fixes the
-    /// id order, so the set need not be ordered.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
-        let size = self.size(ctx);
-        let at = |(y, z, x)| self.get_block_or_air(BlockPos::new(x, y, z), ctx);
+    /// [`get_block_or_air_with`](Self::get_block_or_air_with). The writer alone
+    /// fixes the id order, so the set need not be ordered.
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
+        let size = self.size_with(ctx);
+        let at = |(y, z, x)| self.get_block_or_air_with(BlockPos::new(x, y, z), ctx);
         // Insert one by one: `collect` would reserve the box's whole volume
         // from the iterator's size hint, however few blocks it ends up holding.
         let mut palette = HashSet::new();
@@ -82,16 +84,51 @@ pub trait Layout<Ctx = ()> {
     }
 }
 
-/// Writing a finished layout, whose context is erased, to a projection.
+/// The plain surface of a finished layout: the queries of [`Layout`] with its
+/// context fixed to `()`, plus materialization into a projection.
 ///
-/// Every [`Layout<()>`](Layout) writes itself, so a layout can be written out
-/// with nothing else in scope once this trait is. It lives apart from [`Layout`]
-/// because a type may implement several `Layout<Ctx>`, which would make an
-/// output method on the trait itself ambiguous.
-pub trait AsLitematic {
+/// Every `Layout<()>` gets this for free, so a finished layout reads as
+/// `layout.size()` or `layout.get_block(pos)` rather than spelling out the empty
+/// context. A layout still carrying a context has only the `*_with` queries.
+pub trait LayoutExt: Layout<()> {
+    /// Total size of the bounding box.
+    fn size(&self) -> BlockPos {
+        self.size_with(&())
+    }
+
+    /// Block at the given world position; panics on out-of-bounds access.
+    fn get_block(&self, pos: BlockPos) -> Option<BlockState> {
+        self.get_block_with(pos, &())
+    }
+
+    /// Block at the given world position; `None` when it misses the bounding box.
+    fn try_get_block(&self, pos: BlockPos) -> Option<BlockState> {
+        self.try_get_block_with(pos, &())
+    }
+
+    /// Block at the given world position, or air where the layout is empty.
+    fn get_block_or_air(&self, pos: BlockPos) -> BlockState {
+        self.get_block_or_air_with(pos, &())
+    }
+
+    /// Whether `pos` is inside the bounding box.
+    fn contains(&self, pos: BlockPos) -> bool {
+        self.contains_with(pos, &())
+    }
+
+    /// The block states this instance owns.
+    fn block_palette(&self) -> HashSet<BlockState> {
+        self.block_palette_with(&())
+    }
+
     /// Writes this layout to `sink` as a gzip-compressed litematic projection,
     /// described by `metadata`.
-    fn as_litematic<W: Write>(&self, metadata: Metadata, sink: W) -> io::Result<()>;
+    fn as_litematic<W: Write>(&self, metadata: Metadata, sink: W) -> io::Result<()>
+    where
+        Self: Sized,
+    {
+        schematic::write(self, metadata, sink)
+    }
 
     /// Builds this layout as a `rustmatica` litematic, described by `metadata`.
     ///
@@ -99,20 +136,12 @@ pub trait AsLitematic {
     /// written, so a full song costs gigabytes. It stays only to check the
     /// streaming writer against it.
     #[deprecated(note = "materializes the whole projection; use `as_litematic`")]
-    fn as_rustmatica(&self, metadata: Metadata) -> Litematic;
-}
-
-impl<L: Layout<()>> AsLitematic for L {
-    fn as_litematic<W: Write>(&self, metadata: Metadata, sink: W) -> io::Result<()> {
-        schematic::write(self, metadata, sink)
-    }
-
     fn as_rustmatica(&self, metadata: Metadata) -> Litematic {
-        let size = self.size(&());
+        let size = self.size();
         let mut region = Region::new(metadata.name.to_string(), BlockPos::ORIGIN, size);
         for (y, z, x) in iproduct!(0..size.y, 0..size.z, 0..size.x) {
             let pos = BlockPos::new(x, y, z);
-            region.set_block(pos, self.get_block_or_air(pos, &()).into());
+            region.set_block(pos, self.get_block_or_air(pos).into());
         }
         region.as_litematic(
             metadata.description.to_string(),
@@ -121,27 +150,29 @@ impl<L: Layout<()>> AsLitematic for L {
     }
 }
 
+impl<T: Layout<()>> LayoutExt for T {}
+
 impl<Ctx> Layout<Ctx> for () {
-    fn block_at(&self, _pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, _pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         None
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         BlockPos::ORIGIN
     }
 }
 
 impl<Ctx> Layout<Ctx> for Box<dyn Layout<Ctx> + '_> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        self.as_ref().block_at(pos, ctx)
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+        self.as_ref().block_at_with(pos, ctx)
     }
 
-    fn size(&self, ctx: &Ctx) -> BlockPos {
-        self.as_ref().size(ctx)
+    fn size_with(&self, ctx: &Ctx) -> BlockPos {
+        self.as_ref().size_with(ctx)
     }
 
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
-        self.as_ref().block_palette(ctx)
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
+        self.as_ref().block_palette_with(ctx)
     }
 }
 
@@ -151,28 +182,34 @@ impl<Ctx> Layout<Ctx> for Box<dyn Layout<Ctx> + '_> {
 /// Rust rejects the blanket impl that would make this automatic: it cannot rule
 /// out a downstream impl overlapping a hand-written one, however private the
 /// wrapper, so each wrapper states its delegation here in one line.
+///
+/// Exported for downstream crates, which use it the same way:
+/// `forward_layout!(MyWrapper, ());`.
+#[macro_export]
 macro_rules! forward_layout {
     ($ty:ty, $ctx:ty) => {
         impl $crate::layout::Layout<$ctx> for $ty {
-            fn block_at(
+            fn block_at_with(
                 &self,
                 pos: ::mcdata::util::BlockPos,
                 ctx: &$ctx,
             ) -> Option<$crate::BlockState> {
-                self.0.block_at(pos, ctx)
+                self.0.block_at_with(pos, ctx)
             }
 
-            fn size(&self, ctx: &$ctx) -> ::mcdata::util::BlockPos {
-                self.0.size(ctx)
+            fn size_with(&self, ctx: &$ctx) -> ::mcdata::util::BlockPos {
+                self.0.size_with(ctx)
             }
 
-            fn block_palette(&self, ctx: &$ctx) -> ::std::collections::HashSet<$crate::BlockState> {
-                self.0.block_palette(ctx)
+            fn block_palette_with(
+                &self,
+                ctx: &$ctx,
+            ) -> ::std::collections::HashSet<$crate::BlockState> {
+                self.0.block_palette_with(ctx)
             }
         }
     };
 }
-pub(crate) use forward_layout;
 
 /// Binds a context to a subtree, erasing it into [`Layout<()>`](Layout).
 ///
@@ -192,16 +229,16 @@ impl<Ctx, L> Provided<Ctx, L> {
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<()> for Provided<Ctx, L> {
-    fn block_at(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
-        self.inner.block_at(pos, &self.ctx)
+    fn block_at_with(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
+        self.inner.block_at_with(pos, &self.ctx)
     }
 
-    fn size(&self, _ctx: &()) -> BlockPos {
-        self.inner.size(&self.ctx)
+    fn size_with(&self, _ctx: &()) -> BlockPos {
+        self.inner.size_with(&self.ctx)
     }
 
-    fn block_palette(&self, _ctx: &()) -> HashSet<BlockState> {
-        self.inner.block_palette(&self.ctx)
+    fn block_palette_with(&self, _ctx: &()) -> HashSet<BlockState> {
+        self.inner.block_palette_with(&self.ctx)
     }
 }
 
@@ -211,7 +248,7 @@ impl<Ctx, L: Layout<Ctx>> Layout<()> for Provided<Ctx, L> {
 
 /// A layout wrapper that arranges sub-layouts along an [`Axis`].
 ///
-/// Query cost is O(log n) with `n` the number of sub-layouts: [`Layout::block_at`]
+/// Query cost is O(log n) with `n` the number of sub-layouts: [`Layout::block_at_with`]
 /// locates the containing band via a binary search over the anchors, which are
 /// sorted along the arrangement axis.
 pub struct Arranged<L> {
@@ -231,7 +268,7 @@ impl<L> Arranged<L> {
         let mut extent: BlockPos = BlockPos::ORIGIN;
 
         let placed = layouts.into_iter().map(|layout| {
-            let size: BlockPos = layout.size(ctx);
+            let size: BlockPos = layout.size_with(ctx);
             let anchor: BlockPos = cursor + gap_vec;
             cursor = anchor + unit * size;
             extent = include(extent, size);
@@ -245,7 +282,7 @@ impl<L> Arranged<L> {
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Arranged<L> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         let index = self
             .bands
             .partition_point(|(_, a)| a.y <= pos.y && a.z <= pos.z && a.x <= pos.x)
@@ -253,18 +290,18 @@ impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Arranged<L> {
 
         let (layout, anchor) = &self.bands[index];
         let local = BlockPos::new(pos.x - anchor.x, pos.y - anchor.y, pos.z - anchor.z);
-        layout.try_get_block(local, ctx)
+        layout.try_get_block_with(local, ctx)
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         self.size
     }
 
     /// The union of every band's palette.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
         let mut palette = HashSet::new();
         for (layout, _) in &self.bands {
-            palette.extend(layout.block_palette(ctx));
+            palette.extend(layout.block_palette_with(ctx));
         }
         palette
     }
@@ -287,16 +324,16 @@ impl<L> EdgeArranged<L> {
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for EdgeArranged<L> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        self.0.block_at(pos, ctx)
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+        self.0.block_at_with(pos, ctx)
     }
 
-    fn size(&self, ctx: &Ctx) -> BlockPos {
-        self.0.size(ctx)
+    fn size_with(&self, ctx: &Ctx) -> BlockPos {
+        self.0.size_with(ctx)
     }
 
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
-        self.0.block_palette(ctx)
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
+        self.0.block_palette_with(ctx)
     }
 }
 
@@ -340,7 +377,7 @@ impl<L> EvenlyArranged<L> {
         let items = Vec::from_iter(items);
         let extent = items
             .iter()
-            .map(|item| item.size(ctx))
+            .map(|item| item.size_with(ctx))
             .fold(BlockPos::ORIGIN, include);
         let far = items.len() as i32 - 1;
 
@@ -364,27 +401,27 @@ impl<L> EvenlyArranged<L> {
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for EvenlyArranged<L> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         let local_pos = pos + self.anchor;
         let offset = self.pitch.dot(local_pos);
         let top = (offset - self.bias)
             .div_euclid(self.spacing)
             .min(self.items.len() as i32 - 1);
         let bottom = (top - self.span).max(0);
-        (bottom..=top)
-            .rev()
-            .find_map(|i| self.items[i as usize].try_get_block(local_pos - self.pitch * i, ctx))
+        (bottom..=top).rev().find_map(|i| {
+            self.items[i as usize].try_get_block_with(local_pos - self.pitch * i, ctx)
+        })
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         self.size
     }
 
     /// The union of every item's palette.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
         let mut palette = HashSet::new();
         for item in &self.items {
-            palette.extend(item.block_palette(ctx));
+            palette.extend(item.block_palette_with(ctx));
         }
         palette
     }
@@ -424,30 +461,30 @@ impl<A, B> Overlaid<A, B> {
             BlockPos::new(x, y, z)
         }
         Self {
-            first: (anchor(first_anchor, first.size(ctx), size), first),
-            second: (anchor(second_anchor, second.size(ctx), size), second),
+            first: (anchor(first_anchor, first.size_with(ctx), size), first),
+            second: (anchor(second_anchor, second.size_with(ctx), size), second),
             size,
         }
     }
 }
 
 impl<Ctx, A: Layout<Ctx>, B: Layout<Ctx>> Layout<Ctx> for Overlaid<A, B> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         let (anchor, layout) = &self.first;
-        layout.try_get_block(pos - *anchor, ctx).or_else(|| {
+        layout.try_get_block_with(pos - *anchor, ctx).or_else(|| {
             let (anchor, layout) = &self.second;
-            layout.try_get_block(pos - *anchor, ctx)
+            layout.try_get_block_with(pos - *anchor, ctx)
         })
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         self.size
     }
 
     /// The union of both sub-layouts' palettes.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
-        let mut palette = self.first.1.block_palette(ctx);
-        palette.extend(self.second.1.block_palette(ctx));
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
+        let mut palette = self.first.1.block_palette_with(ctx);
+        palette.extend(self.second.1.block_palette_with(ctx));
         palette
     }
 }
@@ -473,7 +510,7 @@ impl<L> Reverse<L> {
     where
         L: Layout<Ctx>,
     {
-        let bias = sign * (layout.size(ctx) - BlockPos::new(1, 1, 1));
+        let bias = sign * (layout.size_with(ctx) - BlockPos::new(1, 1, 1));
         let factor = BlockPos::new(1, 1, 1) - sign * 2;
         Self {
             layout,
@@ -484,22 +521,22 @@ impl<L> Reverse<L> {
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Reverse<L> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         let orig = BlockPos::new(
             self.bias.x + self.factor.x * pos.x,
             self.bias.y + self.factor.y * pos.y,
             self.bias.z + self.factor.z * pos.z,
         );
-        self.layout.get_block(orig, ctx)
+        self.layout.get_block_with(orig, ctx)
     }
 
-    fn size(&self, ctx: &Ctx) -> BlockPos {
-        self.layout.size(ctx)
+    fn size_with(&self, ctx: &Ctx) -> BlockPos {
+        self.layout.size_with(ctx)
     }
 
     /// The inner palette: mirroring moves cells, it draws no new block.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
-        self.layout.block_palette(ctx)
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
+        self.layout.block_palette_with(ctx)
     }
 }
 
@@ -522,8 +559,8 @@ impl<L> WithFloor<L> {
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for WithFloor<L> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        let inner = |pos: BlockPos| self.layout.get_block(pos, ctx);
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+        let inner = |pos: BlockPos| self.layout.get_block_with(pos, ctx);
         match pos.y {
             0 if self.full => Some(floor_block()),
             0 => inner(pos)
@@ -533,15 +570,15 @@ impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for WithFloor<L> {
         }
     }
 
-    fn size(&self, ctx: &Ctx) -> BlockPos {
-        let size = self.layout.size(ctx);
+    fn size_with(&self, ctx: &Ctx) -> BlockPos {
+        let size = self.layout.size_with(ctx);
         BlockPos::new(size.x, size.y + 1, size.z)
     }
 
     /// The inner palette plus the floor block, the only block this wrapper adds
     /// on top of what the inner layout draws.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
-        let mut palette = self.layout.block_palette(ctx);
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
+        let mut palette = self.layout.block_palette_with(ctx);
         palette.insert(floor_block());
         palette
     }
@@ -580,7 +617,7 @@ impl<L> Clipped<L> {
         L: Layout<Ctx>,
     {
         let anchor = include(pos, BlockPos::ORIGIN);
-        let size = layout.size(ctx) - pos.abs();
+        let size = layout.size_with(ctx) - pos.abs();
 
         Self {
             layout,
@@ -591,17 +628,17 @@ impl<L> Clipped<L> {
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Clipped<L> {
-    fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        self.layout.get_block(pos + self.anchor, ctx)
+    fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+        self.layout.get_block_with(pos + self.anchor, ctx)
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         self.size
     }
 
     /// The inner palette: clipping only drops cells, it draws no new block.
-    fn block_palette(&self, ctx: &Ctx) -> HashSet<BlockState> {
-        self.layout.block_palette(ctx)
+    fn block_palette_with(&self, ctx: &Ctx) -> HashSet<BlockState> {
+        self.layout.block_palette_with(ctx)
     }
 }
 
@@ -726,12 +763,12 @@ mod tests {
     /// A solid cuboid filling its whole box.
     struct Solid(BlockPos);
 
-    impl<Ctx> Layout<Ctx> for Solid {
-        fn block_at(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-            self.contains(pos, ctx).then(air)
+    impl Layout<()> for Solid {
+        fn block_at_with(&self, pos: BlockPos, ctx: &()) -> Option<BlockState> {
+            self.contains_with(pos, ctx).then(air)
         }
 
-        fn size(&self, _ctx: &Ctx) -> BlockPos {
+        fn size_with(&self, _ctx: &()) -> BlockPos {
             self.0
         }
     }
@@ -745,7 +782,7 @@ mod tests {
     fn covered(arranged: &EvenlyArranged<Solid>, pos: BlockPos) -> bool {
         let local = pos + arranged.anchor;
         arranged.items.iter().enumerate().any(|(i, item)| {
-            item.try_get_block(local - arranged.pitch * i as i32, &())
+            item.try_get_block(local - arranged.pitch * i as i32)
                 .is_some()
         })
     }
@@ -768,12 +805,12 @@ mod tests {
     fn window_covers_every_item() {
         for &(sizes, pitch) in &CASES {
             let arranged = build(sizes, pitch);
-            let size = arranged.size(&());
+            let size = arranged.size();
             for z in 0..size.z {
                 for y in 0..size.y {
                     for x in 0..size.x {
                         let pos = BlockPos::new(x, y, z);
-                        let hit = arranged.block_at(pos, &()).is_some();
+                        let hit = arranged.get_block(pos).is_some();
                         assert_eq!(hit, covered(&arranged, pos), "{pos:?} at {pitch:?}");
                     }
                 }
@@ -787,7 +824,7 @@ mod tests {
     fn window_reaches_highest_covering_item() {
         for &(sizes, pitch) in &CASES {
             let arranged = build(sizes, pitch);
-            let size = arranged.size(&());
+            let size = arranged.size();
             let mut needed = 0;
             for z in 0..size.z {
                 for y in 0..size.y {
@@ -800,7 +837,7 @@ mod tests {
                             .min(arranged.items.len() as i32 - 1);
                         let highest = (0..arranged.items.len()).rev().find(|&i| {
                             arranged.items[i]
-                                .try_get_block(local - arranged.pitch * i as i32, &())
+                                .try_get_block(local - arranged.pitch * i as i32)
                                 .is_some()
                         });
                         if let Some(highest) = highest {

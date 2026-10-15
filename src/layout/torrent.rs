@@ -99,11 +99,11 @@ impl TorrentLayout {
     {
         let (tracks, slices) = Self::fill(notes, tracks, omit_empty);
         let linkage = Linkage::new();
-        let anchor = BlockPos::new(0, 0, linkage.size(&tracks).z - 1);
+        let anchor = BlockPos::new(0, 0, linkage.size_with(&tracks).z - 1);
         let slices = slices.into_iter().map(|slots| Template { slots });
         let slices = EvenlyArranged::new(slices, BlockPos::new(0, 0, 2), &tracks);
-        let span = include(linkage.size(&tracks), slices.size(&tracks));
-        let size = BlockPos::new(span.x, span.y, anchor.z + slices.size(&tracks).z);
+        let span = include(linkage.size_with(&tracks), slices.size_with(&tracks));
+        let size = BlockPos::new(span.x, span.y, anchor.z + slices.size_with(&tracks).z);
         let inner = Overlaid::new(BlockPos::ORIGIN, linkage, anchor, slices, size, &tracks);
         Self { tracks, inner }
     }
@@ -211,16 +211,16 @@ impl TorrentLayout {
 
 impl Layout<()> for TorrentLayout {
     /// Reads the inner tunnel against the tracks this layout holds.
-    fn block_at(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
-        self.inner.block_at(pos, &self.tracks)
+    fn block_at_with(&self, pos: BlockPos, _ctx: &()) -> Option<BlockState> {
+        self.inner.block_at_with(pos, &self.tracks)
     }
 
-    fn size(&self, _ctx: &()) -> BlockPos {
-        self.inner.size(&self.tracks)
+    fn size_with(&self, _ctx: &()) -> BlockPos {
+        self.inner.size_with(&self.tracks)
     }
 
-    fn block_palette(&self, _ctx: &()) -> HashSet<BlockState> {
-        self.inner.block_palette(&self.tracks)
+    fn block_palette_with(&self, _ctx: &()) -> HashSet<BlockState> {
+        self.inner.block_palette_with(&self.tracks)
     }
 }
 
@@ -248,16 +248,16 @@ impl Linkage {
 }
 
 impl<Ctx> Layout<Ctx> for Linkage {
-    fn block_at(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         Some(self.0.regions[0].get_block(pos).clone().into())
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         self.0.enclosing_size()
     }
 
     /// The embedded projection's own palette, read straight back out.
-    fn block_palette(&self, _ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         self.0.regions[0]
             .block_palette()
             .iter()
@@ -274,7 +274,7 @@ struct Template {
 }
 
 impl Layout<Vec<(i32, i32)>> for Template {
-    fn block_at(&self, pos: BlockPos, tracks: &Vec<(i32, i32)>) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, tracks: &Vec<(i32, i32)>) -> Option<BlockState> {
         // The track holding this position, by binary search: within `±1` in x and
         // `[-2, 0]` in y, and centres four apart, so one x column is the only one.
         let lo = tracks.partition_point(|&(tx, _)| tx < pos.x - 1);
@@ -319,13 +319,13 @@ impl Layout<Vec<(i32, i32)>> for Template {
         }
     }
 
-    fn size(&self, _tracks: &Vec<(i32, i32)>) -> BlockPos {
+    fn size_with(&self, _tracks: &Vec<(i32, i32)>) -> BlockPos {
         BlockPos::new(99, 71, 2)
     }
 
     /// The blocks a slice can draw: the fixed circuit row plus one note and one
     /// instrument block per stored voice.
-    fn block_palette(&self, _tracks: &Vec<(i32, i32)>) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _tracks: &Vec<(i32, i32)>) -> HashSet<BlockState> {
         use WireConn::{None as Open, Side};
         let mut palette = HashSet::from([
             drive_repeater(),

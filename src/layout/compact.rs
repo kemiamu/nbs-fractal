@@ -1,9 +1,8 @@
 //! Compact note block layouts for NBS song projection.
 
 use super::blocks::{Facing, chain_block, inst_block, note_block, redstone_wire, repeater};
-use super::forward_layout;
 use super::{Arranged, Axis, Clipped, EvenlyArranged, Layout, Overlaid, WithFloor, air};
-use crate::{BlockState, RedStoneTick};
+use crate::{BlockState, RedStoneTick, forward_layout};
 use mcdata::util::BlockPos;
 use rsnbs::{note::Tone, types::Tick};
 use std::collections::HashSet;
@@ -341,7 +340,7 @@ impl Tile {
 }
 
 impl<Ctx> Layout<Ctx> for Tile {
-    fn block_at(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         use self::{Facing::*, Tile::*};
         let south_bound = self.south_bound();
         let local_z = if south_bound { pos.z } else { 1 - pos.z };
@@ -387,13 +386,13 @@ impl<Ctx> Layout<Ctx> for Tile {
         }
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         BlockPos::new(3, 3, 2)
     }
 
     /// The blocks a tile can draw: its stem and cap repeaters, the wire it rides
     /// on, and one note and instrument block per stored tone.
-    fn block_palette(&self, _ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{North, South};
         let facing = match self.south_bound() {
             true => South,
@@ -460,7 +459,7 @@ impl Turn {
 }
 
 impl<Ctx> Layout<Ctx> for Turn {
-    fn block_at(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
+    fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         use self::{Facing::*, Turn::*};
         let local_x = self.width() - 1 - pos.x;
         let repeater = |delay: RedStoneTick| repeater(delay.to_string(), East, false, false);
@@ -493,13 +492,13 @@ impl<Ctx> Layout<Ctx> for Turn {
         }
     }
 
-    fn size(&self, _ctx: &Ctx) -> BlockPos {
+    fn size_with(&self, _ctx: &Ctx) -> BlockPos {
         BlockPos::new(self.width(), 3, 1)
     }
 
     /// The blocks a turn can draw: its stem repeater, the wire it rides on, and
     /// one note and instrument block per stored tone.
-    fn block_palette(&self, _ctx: &Ctx) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         let mut palette = HashSet::from([chain_block(), redstone_wire()]);
         if self.stem() > 0 {
             let delay = self.stem().to_string();

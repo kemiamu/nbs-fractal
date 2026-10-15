@@ -1,7 +1,7 @@
 //! Placement of panning and volume in the Torrent layout.
 
 use mcdata::util::BlockPos;
-use nbs_fractal::layout::{AsLitematic, Layout, torrent::TorrentLayout};
+use nbs_fractal::layout::{LayoutExt, torrent::TorrentLayout};
 use rsnbs::note::{Instrument, Key, Note, Tone};
 use rsnbs::types::{Panning, Volume};
 
@@ -25,15 +25,15 @@ const AXIS: i32 = 49;
 const AXIS_Y: i32 = 46;
 
 /// Every note block in `layout`, ordered by ascending z.
-fn placed(layout: &impl Layout) -> Vec<BlockPos> {
-    let size = layout.size(&());
+fn placed(layout: &impl LayoutExt) -> Vec<BlockPos> {
+    let size = layout.size();
     let mut found = Vec::new();
     for z in 0..size.z {
         for y in 0..size.y {
             for x in 0..size.x {
                 let pos = BlockPos::new(x, y, z);
                 let hit = layout
-                    .block_at(pos, &())
+                    .get_block(pos)
                     .is_some_and(|b| b.name == "minecraft:note_block");
                 if hit {
                     found.push(pos);
