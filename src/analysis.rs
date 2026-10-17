@@ -238,22 +238,21 @@ impl<E: Event> BoundedTec<E> {
     /// expansion, taking the widest shared scatter.
     ///
     /// Each tone exposes a head shape: its ticks relative to its own first
-    /// tick. The scatter is a direct-sum factor shared by all the heads, so it
-    /// folds pairwise: `S = h₁ ∧ h₂ ∧ … ∧ hₖ`. A lone head folds with itself.
+    /// tick. The scatter is a direct-sum factor shared by every head, so all
+    /// the heads are weighed together rather than folded in an arbitrary order.
     pub fn restore(plane: &TePlane<E>) -> Self {
         let mut heads = BTreeMap::<E, Ticks>::new();
         for (&(tick, tone), &count) in plane.iter() {
             heads.entry(tone).or_default().insert(tick, count);
         }
-        let heads = heads.into_values().map(|h| {
-            let base = *h.keys().next().unwrap();
-            h.into_iter().map(|(t, c)| (t - base, c)).collect::<Ticks>()
-        });
-        // `common_factor` is idempotent on sets, so the trailing self-fold only
-        // matters for the lone-head case.
-        let scatter = heads
-            .reduce(|a, b| common_factor(&a, &b))
-            .map_or_else(|| Ticks::from([(0, 1)]), |h| common_factor(&h, &h));
+        let heads: Vec<Ticks> = heads
+            .into_values()
+            .map(|head| {
+                let base = *head.keys().next().unwrap();
+                head.into_iter().map(|(t, c)| (t - base, c)).collect()
+            })
+            .collect();
+        let scatter = common_factor(&heads);
         Self::extract(
             plane,
             scatter.keys().copied().filter_map(NonZero::new).collect(),
@@ -277,27 +276,36 @@ impl<E: Event> Deref for BoundedTec<E> {
 //
 // ++++++++++++============++++++++++++============++++++++++++============
 
-/// Widest common set-factor `S` of `a` and `b`, i.e. `a = K_a (+) S` and
-/// `b = K_b (+) S`. Any common factor's support lies in `supp(a) & supp(b)`, so
-/// the shared ticks are tried widest-first and the first hit is widest.
-fn common_factor(a: &Ticks, b: &Ticks) -> Ticks {
-    let set = |s: BTreeSet<Tick>| -> Ticks { s.into_iter().map(|t| (t, 1)).collect() };
-    let mk = |pick: Vec<&Tick>| -> BTreeSet<Tick> {
-        std::iter::once(0)
-            .chain(pick.into_iter().copied())
-            .collect()
+/// Widest common set-factor of `heads`, i.e. `head = kernel (+) factor` for
+/// every head.
+///
+/// A factor's support divides each head, so it lies in the intersection of the
+/// head supports: the intersection is tried whole, then with one tick dropped,
+/// since a coincidental tick can join an otherwise sound intersection. Without
+/// a hit, `{0}` is the always-valid trivial factor.
+fn common_factor(heads: &[Ticks]) -> Ticks {
+    let support = |head: &Ticks| -> BTreeSet<Tick> { head.keys().copied().collect() };
+    let mut cand = match heads.split_first() {
+        Some((first, rest)) => rest.iter().fold(support(first), |cand, head| {
+            cand.intersection(&support(head)).copied().collect()
+        }),
+        None => BTreeSet::new(),
     };
-    let cand: Vec<Tick> = a
-        .keys()
+    cand.insert(0);
+    let divides_all = |cand: &BTreeSet<Tick>| heads.iter().all(|head| divides(cand, head));
+    let to_ticks = |cand: BTreeSet<Tick>| -> Ticks { cand.into_iter().map(|t| (t, 1)).collect() };
+    if divides_all(&cand) {
+        return to_ticks(cand);
+    }
+    let pruned = cand
+        .iter()
         .copied()
-        .filter(|t| *t != 0 && b.contains_key(t))
-        .collect();
-    let widest = (0..=cand.len())
-        .rev()
-        .flat_map(|size| cand.iter().combinations(size))
-        .map(mk)
-        .find(|s| divides(s, a) && divides(s, b));
-    set(widest.unwrap_or_else(|| BTreeSet::from([0])))
+        .filter(|tick| *tick != 0)
+        .find_map(|drop| {
+            let cand: BTreeSet<Tick> = cand.iter().copied().filter(|t| *t != drop).collect();
+            divides_all(&cand).then_some(cand)
+        });
+    pruned.map_or_else(|| Ticks::from([(0, 1)]), to_ticks)
 }
 
 /// Whether `divisor` divides `dividend` with a nonnegative quotient:
