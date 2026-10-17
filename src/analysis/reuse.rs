@@ -166,20 +166,26 @@ pub fn family_deep_first<E: Event>(
 
 /// Greedy family arbitration of the deep-first family flow.
 ///
-/// Returns `(plan, total_reuse, residual)`. Each round scores every surviving
-/// AP family with its complete deep-first flow, then commits the winner
+/// Only the offsets usable at `min_step` or wider are considered, so an
+/// unusable fine-grained family cannot spend the layer budget. Returns
+/// `(plan, total_reuse, residual)`. Each round scores every surviving AP family
+/// with its complete deep-first flow, then commits the winner
 /// (`score = total - nested_penalty`, deepest len used, smallest d).
 pub fn reuse_flow<E: Event>(
     source: &TePlane<E>,
     max_len: usize,
     max_layers: usize,
+    min_step: Tick,
 ) -> (Vec<TransEqClass<E>>, usize, TePlane<E>) {
     let mut residual = source.clone();
     let mut plan: Vec<TransEqClass<E>> = Vec::new();
     let mut total_reuse = 0;
 
     while plan.len() < max_layers {
-        let support = autocorrelation(&residual);
+        let support: BTreeMap<Tick, usize> = autocorrelation(&residual)
+            .into_iter()
+            .filter(|&(offset, _)| offset >= min_step)
+            .collect();
         let Some(&max_support) = support.values().max() else {
             break;
         };
@@ -234,6 +240,7 @@ pub fn reuse_flow_beam<E: Event>(
     max_len: usize,
     max_layers: usize,
     beam: usize,
+    min_step: Tick,
 ) -> (Vec<TransEqClass<E>>, usize, TePlane<E>) {
     #[derive(Clone)]
     struct Path<E: Event> {
@@ -266,7 +273,10 @@ pub fn reuse_flow_beam<E: Event>(
             for path in &paths {
                 // Enumerate candidate layers on this path's residual:
                 // family-deep-first within each d, competing across families.
-                let sup = autocorrelation(&path.work);
+                let sup: BTreeMap<Tick, usize> = autocorrelation(&path.work)
+                    .into_iter()
+                    .filter(|&(offset, _)| offset >= min_step)
+                    .collect();
                 let Some(&ms) = sup.values().max() else {
                     continue;
                 };
@@ -326,20 +336,20 @@ pub fn reuse_flow_beam<E: Event>(
 
 /// Convert a reuse plan and residual into layout TECs.
 ///
-/// TECs whose minimum offset gap is too tight for the tapped delay line
-/// (repeater coarse >= 4, i.e. min gap >= 8) are skipped and absorbed back
-/// into the residual (degenerate absorption).
+/// TECs whose minimum offset gap is below `min_gap` cannot be realized by the
+/// tapped delay line, so they are skipped and absorbed back into the residual.
 ///
 /// Returns `(tecs, skipped_layers)` where the residual is appended as a
 /// no-offset TEC when non-empty.
 pub fn plan_to_tecs<E: Event>(
     plan: Vec<TransEqClass<E>>,
     mut residual: TePlane<E>,
+    min_gap: Tick,
 ) -> (Vec<TransEqClass<E>>, usize) {
     let mut tecs = Vec::new();
     let mut skipped = 0;
     for tec in plan {
-        if tec.min_gap().is_none_or(|gap| gap < 8) {
+        if tec.min_gap().is_none_or(|gap| gap < min_gap) {
             let expansion = tec.expand();
             for (event, count) in expansion.iter() {
                 add_to(&mut residual, *event, *count);
@@ -422,7 +432,7 @@ mod tests {
             (2100u32, t),
             (3000u32, t),
         ]);
-        let (plan, total, residual) = reuse_flow(&m, 4, 4);
+        let (plan, total, residual) = reuse_flow(&m, 4, 4, 1);
         assert!(total > 3); // best single offset gives 3
         assert!(residual.is_empty());
         verify_composition(&m, &plan, &residual);
@@ -431,7 +441,7 @@ mod tests {
     #[test]
     fn flow_consumes_no_more_than_source() {
         let m = chain(10, 128, 1000);
-        let (plan, _, residual) = reuse_flow(&m, 4, 4);
+        let (plan, _, residual) = reuse_flow(&m, 4, 4, 1);
         verify_composition(&m, &plan, &residual);
     }
 
@@ -440,7 +450,7 @@ mod tests {
         let t = tone();
         let m: TePlane<Tone> =
             TePlane::from_iter([(0u32, t), (128u32, t), (4000u32, t), (4128u32, t)]);
-        let (_, total, _) = reuse_flow(&m, 4, 4);
+        let (_, total, _) = reuse_flow(&m, 4, 4, 1);
         assert_eq!(total, 2); // two isolated pairs, no deep layer possible
     }
 
@@ -460,7 +470,7 @@ mod tests {
         for (ticks, expected) in cases {
             let t = tone();
             let m: TePlane<Tone> = TePlane::from_iter(ticks.iter().map(|&x| (x, t)));
-            let (_, total, _) = reuse_flow(&m, 4, 1000);
+            let (_, total, _) = reuse_flow(&m, 4, 1000, 1);
             assert_eq!(total, *expected, "ticks={ticks:?}");
         }
     }

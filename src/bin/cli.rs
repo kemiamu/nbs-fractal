@@ -365,13 +365,13 @@ impl Decompose {
             0 => usize::MAX,
             n => n,
         };
-        let (plan, _, residual) = reuse_flow(&all_plane, 6, max_layers);
-
-        // Repeater granularity limit: layers whose minimum gap is under 8
-        // (coarse < 4) are filtered out and absorbed back into the residual, so
-        // the output can be safely consumed by TappedLayout; the residual is
-        // kept as an offset-free layer.
-        let (tecs, skipped) = plan_to_tecs(plan, residual);
+        // A tapped layer needs a scatter gap of at least 8 redstone ticks
+        // (repeater coarse >= 4), and the layers are rescaled before that
+        // layout reads them, so the budget is spent in the rescaled domain.
+        // Layers still under that gap are absorbed back into the residual.
+        let min_step = redstone_step(&song, 8);
+        let (plan, _, residual) = reuse_flow(&all_plane, 6, max_layers, min_step);
+        let (tecs, skipped) = plan_to_tecs(plan, residual, min_step);
         if skipped > 0 {
             eprintln!("decompose: skipped {skipped} layer(s) below tapped granularity");
         }
@@ -586,6 +586,22 @@ impl Floor {
 /// Loads the input song.
 fn open_song(input: &str) -> Song {
     Song::open_nbs(input).unwrap()
+}
+
+/// The smallest raw tick step that spans at least `min` redstone ticks once
+/// `song` is rescaled, so a tapped layer built on it stays realizable.
+fn redstone_step(song: &Song, min: Tick) -> Tick {
+    let tempo = song.header.tempo;
+    let gap = |raw: Tick| {
+        let mut ticks = [(0, ()), (raw, ())]
+            .into_iter()
+            .rescale_to_redstone_tick(tempo);
+        let first = ticks.next().expect("probe has two ticks").0;
+        ticks.next().expect("probe has two ticks").0 - first
+    };
+    (min..)
+        .find(|&raw| gap(raw) >= min)
+        .expect("step grows without bound")
 }
 
 /// Ensures the parent directory exists, writes the song as NBS, and reports it.
