@@ -245,6 +245,12 @@ impl Joint {
         }
     }
 
+    /// The bare wire a node's cap climbs onto, one block above its stem.
+    fn lifted_wire() -> BlockState {
+        use WireConn::{Idle, Side};
+        wire_state(Idle, Idle, Side, Side, "0")
+    }
+
     /// The bare wire a joint rides: a node's cap climbs onto its own wire, while
     /// a sink's cap meets it flat.
     fn wire(&self, south_bound: bool) -> BlockState {
@@ -265,7 +271,7 @@ impl Joint {
 
 impl Layout<bool> for Joint {
     fn block_at_with(&self, pos: BlockPos, &south_bound: &bool) -> Option<BlockState> {
-        use {Facing::*, Joint::*, WireConn::*};
+        use {Facing::*, Joint::*};
         let local_z = if south_bound { pos.z } else { 1 - pos.z };
         let facing = || if south_bound { South } else { North };
         let repeater = |delay: RedStoneTick| repeater(delay.to_string(), facing(), false, false);
@@ -273,8 +279,10 @@ impl Layout<bool> for Joint {
 
         let stem = || match (pos.x, pos.y) {
             (1, 0) => Some(chain_block()),
-            (1, 1) if self.stem() > 0 => Some(repeater(self.stem())),
-            (1, 1) => Some(self.wire(south_bound)),
+            (1, 1) => Some(match self.stem() {
+                0 => self.wire(south_bound),
+                stem => repeater(stem),
+            }),
             _ => None,
         };
         let hold = |cap: RedStoneTick| match (pos.x, pos.y) {
@@ -284,7 +292,7 @@ impl Layout<bool> for Joint {
         };
         let node = |cap: [Option<Tone>; 2]| match (pos.x, pos.y) {
             (1, 0 | 1) => Some(chain_block()),
-            (1, 2) => Some(wire_state(Idle, Idle, Side, Side, "0")),
+            (1, 2) => Some(Self::lifted_wire()),
             (0, 0) => Some(inst_block(cap[0], air)),
             (0, 1) => Some(note_block(cap[0], air)),
             (2, 0) => Some(inst_block(cap[1], air)),
@@ -313,28 +321,23 @@ impl Layout<bool> for Joint {
         BlockPos::new(3, 3, 2)
     }
 
-    /// The blocks a joint can draw: its stem and cap repeaters, the wire it rides
-    /// on, and one note and instrument block per stored tone.
+    /// The blocks a joint can draw: its chain stem, the repeater or bare wire its
+    /// stem rides, the wire a node's cap climbs onto, and one note and instrument
+    /// block per stored tone.
     fn block_palette_with(&self, &south_bound: &bool) -> HashSet<BlockState> {
         use Facing::{North, South};
-        use WireConn::{Idle, Side};
-        let facing = match south_bound {
-            true => South,
-            false => North,
-        };
+        let facing = if south_bound { South } else { North };
         let repeater = |delay: RedStoneTick| repeater(delay.to_string(), facing, false, false);
         let mut palette = HashSet::from([chain_block()]);
-        if matches!(self, Joint::Sink { .. } | Joint::Node { .. }) {
-            palette.insert(self.wire(south_bound));
-        }
-        if matches!(self, Joint::Node { .. }) {
-            palette.insert(wire_state(Idle, Idle, Side, Side, "0"));
-        }
-        if self.stem() > 0 {
-            palette.insert(repeater(self.stem()));
-        }
+        match self.stem() {
+            0 => palette.insert(self.wire(south_bound)),
+            stem => palette.insert(repeater(stem)),
+        };
         if let Joint::Hold { cap, .. } = *self {
             palette.insert(repeater(cap));
+        }
+        if matches!(self, Joint::Node { .. } | Joint::DelayedNode { .. }) {
+            palette.insert(Self::lifted_wire());
         }
         let caps: &[Option<Tone>] = match self {
             Joint::Hold { .. } => &[],
