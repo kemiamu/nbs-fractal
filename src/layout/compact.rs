@@ -72,13 +72,6 @@ impl CompactLayout {
 
 forward_layout!(CompactLayout, ());
 
-/// The row-level context every joint and turn in a row is read within: the width
-/// it spans and which way it faces.
-struct Frame {
-    width: i32,
-    south_bound: bool,
-}
-
 /// One directional row of joints, read within the [`Frame`] it holds.
 struct Row(Provided<Frame, Overlaid<Turn, EvenlyArranged<Joint>>>);
 
@@ -122,6 +115,13 @@ impl Layout<Frame> for Joint {
     fn block_palette_with(&self, frame: &Frame) -> HashSet<BlockState> {
         Layout::block_palette_with(self, &frame.south_bound)
     }
+}
+
+/// The row-level context every joint and turn in a row is read within: the width
+/// it spans and which way it faces.
+struct Frame {
+    width: i32,
+    south_bound: bool,
 }
 
 // Template: Turn
