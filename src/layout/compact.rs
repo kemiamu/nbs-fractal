@@ -1,7 +1,7 @@
 //! Compact note block layouts for NBS song projection.
 
 use super::blocks::{Facing, chain_block, inst_block, note_block, redstone_wire, repeater};
-use super::{Arranged, Axis, Clipped, EvenlyArranged, Layout, Overlaid, Provided, WithFloor, air};
+use super::{Clipped, EvenlyArranged, Layout, Overlaid, Provided, WithFloor, air};
 use crate::{BlockState, RedStoneTick, forward_layout};
 use mcdata::util::BlockPos;
 use rsnbs::{note::Tone, types::Tick};
@@ -15,7 +15,7 @@ use std::num::NonZero;
 
 /// Compact variable-length packed structure: one packed line per track, stacked
 /// vertically.
-pub struct MultiCompactLayout(Arranged<WithFloor<CompactLayout>>);
+pub struct MultiCompactLayout(EvenlyArranged<WithFloor<CompactLayout>>);
 
 impl MultiCompactLayout {
     /// Create a multi-track compact layout from multiple redstone note groups,
@@ -35,7 +35,7 @@ impl MultiCompactLayout {
             let line = CompactLayout::new(notes, coarse, wrap_length, gap);
             WithFloor::new(line, full)
         });
-        Self(Arranged::new(layers, Axis::Elevation, 0, &()))
+        Self(EvenlyArranged::new(layers, BlockPos::new(0, 4, 0), &()))
     }
 }
 
