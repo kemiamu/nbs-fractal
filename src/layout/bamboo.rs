@@ -11,6 +11,154 @@ use crate::{BlockState, RedStoneTick};
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use std::collections::HashSet;
+use std::iter::{self, Peekable};
+
+// Emitter & Events
+// ++++++++++++============++++++++++++============++++++++++++============
+
+struct Emitter<'a, I: Iterator> {
+    events: &'a mut Events<I>,
+    coarse: RedStoneTick,
+    terminal: bool,
+    chained: bool,
+    raised: bool,
+}
+
+impl<'a, I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Emitter<'a, I> {
+    fn new(events: &'a mut Events<I>, coarse: RedStoneTick) -> Self {
+        Self {
+            events,
+            coarse,
+            terminal: false,
+            chained: false,
+            raised: false,
+        }
+    }
+
+    fn joint(&mut self, closing: bool) -> Option<Joint> {
+        debug_assert!(!(self.coarse == 1 && self.chained));
+
+        let (wait, count) = self.events.pending()?;
+        let bought = match (self.coarse, self.chained, closing) {
+            (c @ 2..=4, false, _) if wait == c * 3 => Some((c, 0)),
+            (c @ 2..=4, _, false) if wait > c * 2 => Some((c, c)),
+            (c @ 2..=4, true, _) if wait == c * 2 => Some((c, 1)),
+            (c @ 2..=4, true, _) if wait >= c => Some((c - 1, 0)),
+            (c @ 1..=4, false, _) if wait > c => Some((c, 0)),
+            (_, false, _) if wait > 8 => Some((4, 4)),
+            (_, false, _) if wait > 4 => Some((4, 0)),
+            _ => None,
+        };
+
+        let feeds = closing && (bought.is_some() || count > 3 || self.events.has_next_group());
+        let terminal = !feeds && (wait > 0 || (count <= 3 && !self.terminal));
+        let (stem, cap) = bought.unwrap_or((wait, 0));
+        self.events.take_waits(stem + cap);
+        let placed = bought.map_or(count, |_| 0);
+        let joint = match (cap > 0, terminal) {
+            (true, _) => Joint::hold(stem, cap),
+            (false, true) => Joint::sink(stem, self.load(placed), self.raised),
+            (false, false) => Joint::node(stem, self.load(placed), self.raised),
+        };
+
+        self.terminal = matches!(joint, Joint::Sink { .. } | Joint::DelayedSink { .. });
+        self.chained = matches!(joint, Joint::Hold { cap, .. } if cap == self.coarse);
+        self.raised = matches!(joint, Joint::Node { .. } | Joint::DelayedNode { .. });
+        Some(joint)
+    }
+
+    fn load<const N: usize>(&mut self, count: usize) -> [Option<Tone>; N] {
+        let mut cap = [None; N];
+        for slot in cap.iter_mut().take(count.min(N)) {
+            *slot = Some(self.events.take_note());
+        }
+        cap
+    }
+}
+
+/// Notes and waits expanded from grouped input: the waits between groups and
+/// the notes of each group.
+///
+/// Iterating yields each gap tick as `None` and each cached note as `Some` in
+/// turn, so a consumer can spend waits and take notes without looking ahead.
+pub struct Events<I: Iterator> {
+    /// The groups still to read, as `(tick, note)` pairs in the order given.
+    notes: Peekable<I>,
+    /// Ticks left to wait before the next cached note is due.
+    wait: RedStoneTick,
+    /// Notes of the current group, yielded one per `Some` item.
+    cache: Vec<Tone>,
+    /// Tick of the group last read, from which the next wait is measured.
+    last: RedStoneTick,
+}
+
+impl<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Events<I> {
+    pub fn new(notes: Peekable<I>, last: RedStoneTick) -> Self {
+        let mut this = Self {
+            notes,
+            last,
+            wait: 0,
+            cache: Vec::new(),
+        };
+        this.refresh();
+        this
+    }
+
+    pub fn pending(&self) -> Option<(RedStoneTick, usize)> {
+        (!self.cache.is_empty()).then_some((self.wait, self.cache.len()))
+    }
+
+    pub fn has_next_group(&mut self) -> bool {
+        self.notes.peek().is_some()
+    }
+
+    pub fn take_waits(&mut self, ticks: RedStoneTick) {
+        for _ in 0..ticks {
+            let event = self.next();
+            debug_assert!(event == Some(None));
+        }
+    }
+
+    pub fn take_note(&mut self) -> Tone {
+        match self.next() {
+            Some(Some(note)) => note,
+            _ => unreachable!(),
+        }
+    }
+
+    fn refresh(&mut self) -> Option<()> {
+        debug_assert!(self.cache.is_empty() && self.wait == 0);
+        let (tick, notes) = Self::load(&mut self.notes)?;
+        self.wait = tick.wrapping_sub(self.last);
+        self.last = tick;
+        self.cache.extend(notes);
+        Some(())
+    }
+
+    fn load(notes: &mut Peekable<I>) -> Option<(RedStoneTick, impl Iterator<Item = Tone> + '_)> {
+        let (tick, note) = notes.next()?;
+        let rest = iter::from_fn(move || notes.next_if(|&(t, _)| t == tick).map(|(_, n)| n.into()));
+        Some((tick, iter::once(note.into()).chain(rest)))
+    }
+}
+
+impl<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Iterator for Events<I> {
+    type Item = Option<Tone>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.wait > 0 {
+            self.wait -= 1;
+            return Some(None);
+        }
+        let Some(note) = self.cache.pop() else {
+            return None;
+        };
+        if self.cache.is_empty() {
+            self.refresh();
+        }
+        Some(Some(note))
+    }
+}
 
 // Joint: the smallest unit of a row
 // ++++++++++++============++++++++++++============++++++++++++============
