@@ -173,10 +173,13 @@ impl TorrentLayout {
     /// heard at. Every track gives three slots, at its own x and the cells either
     /// side, each keyed by `(track_x, track_y, local_x)`.
     ///
-    /// A track's volume first falls off linearly with its distance from the axis,
-    /// but that linear amplitude reads as too sharp a drop at the far side, so a
-    /// sensory conversion lifts it by a root to give the even falloff the senses
-    /// expect.
+    /// A track's volume falls off linearly with its planar distance from the
+    /// axis. The listener stands four blocks in front, but that standoff shifts
+    /// the heard gain by well under a decibel across the field, so the planar
+    /// distance is a close enough read of the 3D one. NBS velocity is a linear
+    /// playback gain, and the game attenuates a note block linearly, so a slot
+    /// `d` blocks out is heard at `100 * (48 - d) / 48` — the same scale
+    /// `layer_volume * note_velocity / 100` uses.
     ///
     /// A track's panning is read from the horizontal angle it makes with the
     /// listener, leaning left as it gains x.
@@ -188,7 +191,7 @@ impl TorrentLayout {
             let (dx, dy) = (tx + cell - cx, ty - cy);
             let d = (dx * dx + dy * dy).isqrt();
             let lin = if d > 48 { 0 } else { 48 - d };
-            let volume = (lin * 10000 / 48).isqrt();
+            let volume = lin * 100 / 48;
             let panning = -dx * 100 / (dx * dx + 16).isqrt();
             slots.push(((panning as i8, volume as u8), (tx, ty, cell)));
         }
