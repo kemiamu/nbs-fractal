@@ -2,28 +2,21 @@
 //!
 //! A compact line is built from [`Joint`]s, each a bamboo joint whose stem carries
 //! the repeaters and whose cap carries the note blocks. Joints stack end to end
-//! into one long culm, and each is read within the [`Frame`] of the row that owns
-//! it, so it learns the row width and facing from its parent instead of storing
-//! them.
+//! into one long culm, and each is read within the row's south-bound flag, so it
+//! learns the facing from its parent instead of storing it.
 
-use super::blocks::{Facing, chain_block, inst_block, note_block, redstone_wire, repeater};
+use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
 use super::{Layout, air};
 use crate::{BlockState, RedStoneTick};
 use mcdata::util::BlockPos;
 use rsnbs::note::Tone;
 use std::collections::HashSet;
 
-/// The row-level context every joint in a row is read within: the width it spans
-/// and which way it faces.
-pub struct Frame {
-    /// Width of the row in blocks.
-    pub width: i32,
-    /// Whether the row runs south-bound rather than north-bound.
-    pub south_bound: bool,
-}
+// Joint: the smallest unit of a row
+// ++++++++++++============++++++++++++============++++++++++++============
 
-/// One joint of a compact row: a stem of `stem` tick repeaters and a cap of up
-/// to three notes.
+/// One joint of a compact row: a stem carrying `stem` tick repeaters or bare
+/// wire, and a cap of up to three notes.
 #[derive(Clone, Copy)]
 pub enum Joint {
     /// A stem topped by a repeater instead of notes, used to delay in place.
@@ -33,15 +26,29 @@ pub enum Joint {
         /// Ticks the cap repeater adds.
         cap: RedStoneTick,
     },
-    /// A stem feeding this row's chain and three notes on the cap.
+    /// Bare wire sinking three notes into this row's chain, with no delay.
     Sink {
+        /// Whether the previous cap raises this wire.
+        raised: bool,
+        /// Notes played on the cap.
+        cap: [Option<Tone>; 3],
+    },
+    /// Bare wire riding upward and two notes on the cap, with no delay.
+    Node {
+        /// Whether the previous cap raises this wire.
+        raised: bool,
+        /// Notes played on the cap.
+        cap: [Option<Tone>; 2],
+    },
+    /// A delayed stem sinking three notes into this row's chain.
+    DelayedSink {
         /// Ticks in the stem.
         stem: RedStoneTick,
         /// Notes played on the cap.
         cap: [Option<Tone>; 3],
     },
-    /// A stem riding the wire upward and two notes on the cap.
-    Node {
+    /// A delayed stem riding upward and two notes on the cap.
+    DelayedNode {
         /// Ticks in the stem.
         stem: RedStoneTick,
         /// Notes played on the cap.
@@ -50,12 +57,7 @@ pub enum Joint {
 }
 
 impl Joint {
-    /// Ticks the stem delays.
-    pub fn stem(&self) -> RedStoneTick {
-        match *self {
-            Joint::Hold { stem, .. } | Joint::Sink { stem, .. } | Joint::Node { stem, .. } => stem,
-        }
-    }
+    // Constructors...
 
     /// A joint holding its cap repeater for `cap` extra ticks.
     pub fn hold(stem: RedStoneTick, cap: RedStoneTick) -> Self {
@@ -63,29 +65,75 @@ impl Joint {
     }
 
     /// A joint sinking three notes into the row's chain.
-    pub fn sink(stem: RedStoneTick, cap: [Option<Tone>; 3]) -> Self {
-        Self::Sink { stem, cap }
+    ///
+    /// A delayed stem is all repeaters, so `raised` only bears on a bare wire.
+    pub fn sink(stem: RedStoneTick, cap: [Option<Tone>; 3], raised: bool) -> Self {
+        match stem {
+            0 => Self::Sink { raised, cap },
+            stem => Self::DelayedSink { stem, cap },
+        }
     }
 
     /// A joint riding the wire into the next row.
-    pub fn node(stem: RedStoneTick, cap: [Option<Tone>; 2]) -> Self {
-        Self::Node { stem, cap }
+    ///
+    /// A delayed stem is all repeaters, so `raised` only bears on a bare wire.
+    pub fn node(stem: RedStoneTick, cap: [Option<Tone>; 2], raised: bool) -> Self {
+        match stem {
+            0 => Self::Node { raised, cap },
+            stem => Self::DelayedNode { stem, cap },
+        }
+    }
+
+    // Query methods...
+
+    /// Ticks the stem delays.
+    pub fn stem(&self) -> RedStoneTick {
+        match *self {
+            Joint::Sink { .. } | Joint::Node { .. } => 0,
+            Joint::Hold { stem, .. }
+            | Joint::DelayedSink { stem, .. }
+            | Joint::DelayedNode { stem, .. } => stem,
+        }
+    }
+
+    /// Whether the previous cap raises the bare wire.
+    pub fn raised(&self) -> bool {
+        match *self {
+            Joint::Sink { raised, .. } | Joint::Node { raised, .. } => raised,
+            _ => unreachable!(),
+        }
+    }
+
+    /// The bare wire a joint rides: a node's cap climbs onto its own wire, while
+    /// a sink's cap meets it flat.
+    fn wire(&self, south_bound: bool) -> BlockState {
+        use WireConn::*;
+        let forward = match *self {
+            Self::Node { .. } => Up,
+            Self::Sink { .. } => Side,
+            _ => unreachable!(),
+        };
+        let backward = if self.raised() { Up } else { Side };
+        let (north, south) = match south_bound {
+            true => (backward, forward),
+            false => (forward, backward),
+        };
+        wire_state(Idle, Idle, north, south, "0")
     }
 }
 
-impl Layout<Frame> for Joint {
-    fn block_at_with(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
-        use self::{Facing::*, Joint::*};
-        let south_bound = frame.south_bound;
+impl Layout<bool> for Joint {
+    fn block_at_with(&self, pos: BlockPos, &south_bound: &bool) -> Option<BlockState> {
+        use {Facing::*, Joint::*, WireConn::*};
         let local_z = if south_bound { pos.z } else { 1 - pos.z };
-        let facing = if south_bound { South } else { North };
-        let repeater = |delay: RedStoneTick| repeater(delay.to_string(), facing, false, false);
+        let facing = || if south_bound { South } else { North };
+        let repeater = |delay: RedStoneTick| repeater(delay.to_string(), facing(), false, false);
         debug_assert!(!matches!(self, Hold { stem: 0, .. } | Hold { cap: 0, .. }));
 
         let stem = || match (pos.x, pos.y) {
             (1, 0) => Some(chain_block()),
-            (1, 1) if self.stem() == 0 => Some(redstone_wire()),
-            (1, 1) => Some(repeater(self.stem())),
+            (1, 1) if self.stem() > 0 => Some(repeater(self.stem())),
+            (1, 1) => Some(self.wire(south_bound)),
             _ => None,
         };
         let hold = |cap: RedStoneTick| match (pos.x, pos.y) {
@@ -95,7 +143,7 @@ impl Layout<Frame> for Joint {
         };
         let node = |cap: [Option<Tone>; 2]| match (pos.x, pos.y) {
             (1, 0 | 1) => Some(chain_block()),
-            (1, 2) => Some(redstone_wire()),
+            (1, 2) => Some(wire_state(Idle, Idle, Side, Side, "0")),
             (0, 0) => Some(inst_block(cap[0], air)),
             (0, 1) => Some(note_block(cap[0], air)),
             (2, 0) => Some(inst_block(cap[1], air)),
@@ -114,19 +162,19 @@ impl Layout<Frame> for Joint {
         match (local_z, *self) {
             (0, _) => stem(),
             (1, Hold { cap, .. }) => hold(cap),
-            (1, Node { cap, .. }) => node(cap),
-            (1, Sink { cap, .. }) => sink(cap),
+            (1, Node { cap, .. } | DelayedNode { cap, .. }) => node(cap),
+            (1, Sink { cap, .. } | DelayedSink { cap, .. }) => sink(cap),
             _ => unreachable!(),
         }
     }
 
-    fn size_with(&self, _frame: &Frame) -> BlockPos {
+    fn size_with(&self, _ctx: &bool) -> BlockPos {
         BlockPos::new(3, 3, 2)
     }
 
     /// The blocks a joint can draw: its stem and cap repeaters, the wire it rides
     /// on, and one note and instrument block per stored tone.
-    fn block_palette_with(&self, _frame: &Frame) -> HashSet<BlockState> {
+    fn block_palette_with(&self, _ctx: &bool) -> HashSet<BlockState> {
         todo!()
     }
 }
