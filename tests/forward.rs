@@ -28,5 +28,5 @@ fn forwards_through_the_exported_macro() {
     let wrapper = Wrapper(Solid);
     assert_eq!(wrapper.size(), BlockPos::new(2, 1, 1));
     assert!(wrapper.get_block(BlockPos::new(1, 0, 0)).is_some());
-    assert!(wrapper.try_get_block(BlockPos::new(2, 0, 0)).is_none());
+    assert!(wrapper.get_block(BlockPos::new(2, 0, 0)).is_none());
 }

@@ -203,14 +203,14 @@ impl Template {
     /// Keeps a track's middle slot powered when it carries no voice, so the row's
     /// signal still runs through.
     fn relay(&self, y: i32, track: usize, x: i32) -> Option<BlockState> {
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         let slots = &self.slots[track];
         let split = slots[1].is_some() || slots[2].is_some();
         let bare_heart = x == TRACK[Self::CENTRE[1]] && slots[0].is_none() && split;
         if y == 0 || bare_heart {
             return Some(chain_block());
         }
-        Some(wire_state(Open, Open, Side, Side, "0"))
+        Some(wire_state(Idle, Idle, Side, Side, "0"))
     }
 
     /// Records a voice, spilling outward onto the quieter tracks once its own is full.
@@ -264,11 +264,11 @@ impl<Ctx> Layout<Ctx> for Template {
     /// The blocks a row can draw: the drive row, the relay, and one note and
     /// instrument block per stored voice.
     fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         let mut palette = HashSet::from([
             chain_block(),
             repeater("1", Facing::South, false, false),
-            wire_state(Open, Open, Side, Side, "0"),
+            wire_state(Idle, Idle, Side, Side, "0"),
         ]);
         for tone in self.slots.iter().flatten().flatten() {
             palette.insert(note_block(Some(tone), air));
@@ -283,7 +283,7 @@ struct Linkage;
 
 impl<Ctx> Layout<Ctx> for Linkage {
     fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         match (pos.z, pos.y, pos.x) {
             // z0..=z2
             (0..=2, 0, 45) => Some(chain_block()),
@@ -292,12 +292,12 @@ impl<Ctx> Layout<Ctx> for Linkage {
             // z3
             (3, 1, 1 | 16 | 30) => Some(repeater("1", Facing::West, false, false)),
             (3, 1, 60 | 74 | 89) => Some(repeater("1", Facing::East, false, false)),
-            (3, 1, 0) => Some(wire_state(Open, Side, Open, Side, "0")),
-            (3, 1, 90) => Some(wire_state(Side, Open, Open, Side, "0")),
+            (3, 1, 0) => Some(wire_state(Idle, Side, Idle, Side, "0")),
+            (3, 1, 90) => Some(wire_state(Side, Idle, Idle, Side, "0")),
             (3, 1, 45) => Some(wire_state(Side, Side, Side, Side, "0")),
-            (3, 1, x) if TRACK.contains(&x) => Some(wire_state(Side, Side, Open, Side, "0")),
+            (3, 1, x) if TRACK.contains(&x) => Some(wire_state(Side, Side, Idle, Side, "0")),
             (3, 0, 0..=90) => Some(chain_block()),
-            (3, 1, 0..=90) => Some(wire_state(Side, Side, Open, Open, "0")),
+            (3, 1, 0..=90) => Some(wire_state(Side, Side, Idle, Idle, "0")),
             // z4
             (4, 0, x) if TRACK.contains(&x) => Some(chain_block()),
             (4, 1, 0 | 90) => Some(repeater("1", Facing::South, false, false)),
@@ -316,7 +316,7 @@ impl<Ctx> Layout<Ctx> for Linkage {
     /// The whole fixed startup: its chain, button, repeaters and wire links.
     fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{East, South, West};
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         HashSet::from([
             chain_block(),
             button(),
@@ -326,11 +326,11 @@ impl<Ctx> Layout<Ctx> for Linkage {
             repeater("2", South, false, false),
             repeater("3", South, false, false),
             repeater("4", South, false, false),
-            wire_state(Open, Side, Open, Side, "0"),
-            wire_state(Side, Open, Open, Side, "0"),
+            wire_state(Idle, Side, Idle, Side, "0"),
+            wire_state(Side, Idle, Idle, Side, "0"),
             wire_state(Side, Side, Side, Side, "0"),
-            wire_state(Side, Side, Open, Side, "0"),
-            wire_state(Side, Side, Open, Open, "0"),
+            wire_state(Side, Side, Idle, Side, "0"),
+            wire_state(Side, Side, Idle, Idle, "0"),
         ])
     }
 }

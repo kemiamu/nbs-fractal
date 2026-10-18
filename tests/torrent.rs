@@ -56,6 +56,16 @@ fn louder_lands_nearer_the_axis() {
     assert!(distance(&placed[0]) < distance(&placed[1]));
 }
 
+/// NBS velocity is a linear playback gain, so half volume is heard halfway down
+/// the 48-block falloff rather than at its sensory midpoint.
+#[test]
+fn volume_falls_off_linearly() {
+    let layout = TorrentLayout::new([(0u32, note(0, 50))], TorrentLayout::DEFAULT_TRACKS, false);
+    let placed = placed(&layout);
+    let distance = |p: &BlockPos| (p.x - AXIS).pow(2) + (p.y - AXIS_Y).pow(2);
+    assert_eq!(distance(&placed[0]), 24 * 24);
+}
+
 #[test]
 fn panning_spreads_across_the_axis() {
     let layout = TorrentLayout::new(

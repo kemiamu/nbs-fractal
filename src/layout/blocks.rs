@@ -231,7 +231,7 @@ pub fn chain_block() -> BlockState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireConn {
     /// No connection on this side.
-    None,
+    Idle,
     /// Connected to a wire beside it.
     Side,
     /// Connected to a wire above it.
@@ -242,7 +242,7 @@ impl WireConn {
     /// Minecraft property value of this connection state.
     pub fn name(self) -> &'static str {
         match self {
-            Self::None => "none",
+            Self::Idle => "none",
             Self::Side => "side",
             Self::Up => "up",
         }

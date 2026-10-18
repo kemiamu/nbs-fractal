@@ -8,6 +8,7 @@ use rustmatica::{Litematic, Region};
 use std::collections::HashSet;
 use std::io::{self, Write};
 
+pub mod bamboo;
 pub mod blocks;
 pub mod cascade;
 pub mod compact;
@@ -38,14 +39,8 @@ pub trait Layout<Ctx = ()> {
     /// Total size of the bounding box, read within `ctx`.
     fn size_with(&self, ctx: &Ctx) -> BlockPos;
 
-    /// Block at the given world position; panics on out-of-bounds access.
-    fn get_block_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        debug_assert!(self.contains_with(pos, ctx), "block out of bounds: {pos:?}");
-        self.block_at_with(pos, ctx)
-    }
-
     /// Block at the given world position; `None` when it misses the bounding box.
-    fn try_get_block_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
+    fn get_block_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         match self.contains_with(pos, ctx) {
             true => self.block_at_with(pos, ctx),
             false => None,
@@ -88,22 +83,23 @@ pub trait Layout<Ctx = ()> {
 /// context fixed to `()`, plus materialization into a projection.
 ///
 /// Every `Layout<()>` gets this for free, so a finished layout reads as
-/// `layout.size()` or `layout.get_block(pos)` rather than spelling out the empty
-/// context. A layout still carrying a context has only the `*_with` queries.
+/// `layout.size()` or `layout.get_block(pos)` rather than spelling out the
+/// empty context. A layout still carrying a context has only the `*_with`
+/// queries.
 pub trait LayoutExt: Layout<()> {
+    /// Block at the given world position, assumed in bounds.
+    fn block_at(&self, pos: BlockPos) -> Option<BlockState> {
+        self.block_at_with(pos, &())
+    }
+
     /// Total size of the bounding box.
     fn size(&self) -> BlockPos {
         self.size_with(&())
     }
 
-    /// Block at the given world position; panics on out-of-bounds access.
+    /// Block at the given world position; `None` when it misses the bounding box.
     fn get_block(&self, pos: BlockPos) -> Option<BlockState> {
         self.get_block_with(pos, &())
-    }
-
-    /// Block at the given world position; `None` when it misses the bounding box.
-    fn try_get_block(&self, pos: BlockPos) -> Option<BlockState> {
-        self.try_get_block_with(pos, &())
     }
 
     /// Block at the given world position, or air where the layout is empty.
@@ -290,7 +286,7 @@ impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Arranged<L> {
 
         let (layout, anchor) = &self.bands[index];
         let local = BlockPos::new(pos.x - anchor.x, pos.y - anchor.y, pos.z - anchor.z);
-        layout.try_get_block_with(local, ctx)
+        layout.get_block_with(local, ctx)
     }
 
     fn size_with(&self, _ctx: &Ctx) -> BlockPos {
@@ -408,9 +404,9 @@ impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for EvenlyArranged<L> {
             .div_euclid(self.spacing)
             .min(self.items.len() as i32 - 1);
         let bottom = (top - self.span).max(0);
-        (bottom..=top).rev().find_map(|i| {
-            self.items[i as usize].try_get_block_with(local_pos - self.pitch * i, ctx)
-        })
+        (bottom..=top)
+            .rev()
+            .find_map(|i| self.items[i as usize].get_block_with(local_pos - self.pitch * i, ctx))
     }
 
     fn size_with(&self, _ctx: &Ctx) -> BlockPos {
@@ -471,9 +467,9 @@ impl<A, B> Overlaid<A, B> {
 impl<Ctx, A: Layout<Ctx>, B: Layout<Ctx>> Layout<Ctx> for Overlaid<A, B> {
     fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         let (anchor, layout) = &self.first;
-        layout.try_get_block_with(pos - *anchor, ctx).or_else(|| {
+        layout.get_block_with(pos - *anchor, ctx).or_else(|| {
             let (anchor, layout) = &self.second;
-            layout.try_get_block_with(pos - *anchor, ctx)
+            layout.get_block_with(pos - *anchor, ctx)
         })
     }
 
@@ -527,7 +523,7 @@ impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Reverse<L> {
             self.bias.y + self.factor.y * pos.y,
             self.bias.z + self.factor.z * pos.z,
         );
-        self.layout.get_block_with(orig, ctx)
+        self.layout.block_at_with(orig, ctx)
     }
 
     fn size_with(&self, ctx: &Ctx) -> BlockPos {
@@ -560,7 +556,7 @@ impl<L> WithFloor<L> {
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for WithFloor<L> {
     fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        let inner = |pos: BlockPos| self.layout.get_block_with(pos, ctx);
+        let inner = |pos: BlockPos| self.layout.block_at_with(pos, ctx);
         match pos.y {
             0 if self.full => Some(floor_block()),
             0 => inner(pos)
@@ -629,7 +625,7 @@ impl<L> Clipped<L> {
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Clipped<L> {
     fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        self.layout.get_block_with(pos + self.anchor, ctx)
+        self.layout.block_at_with(pos + self.anchor, ctx)
     }
 
     fn size_with(&self, _ctx: &Ctx) -> BlockPos {
@@ -781,10 +777,11 @@ mod tests {
     /// Whether any item covers `pos`, by scanning the whole lattice.
     fn covered(arranged: &EvenlyArranged<Solid>, pos: BlockPos) -> bool {
         let local = pos + arranged.anchor;
-        arranged.items.iter().enumerate().any(|(i, item)| {
-            item.try_get_block(local - arranged.pitch * i as i32)
-                .is_some()
-        })
+        arranged
+            .items
+            .iter()
+            .enumerate()
+            .any(|(i, item)| item.get_block(local - arranged.pitch * i as i32).is_some())
     }
 
     /// Pitch and item sizes sweeping positive, negative, mixed and overlapping
@@ -837,7 +834,7 @@ mod tests {
                             .min(arranged.items.len() as i32 - 1);
                         let highest = (0..arranged.items.len()).rev().find(|&i| {
                             arranged.items[i]
-                                .try_get_block(local - arranged.pitch * i as i32)
+                                .get_block(local - arranged.pitch * i as i32)
                                 .is_some()
                         });
                         if let Some(highest) = highest {
