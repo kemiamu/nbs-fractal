@@ -27,10 +27,10 @@ pub struct TappedLayout {
 impl TappedLayout {
     /// Builds the composite layout from bounded TEC data.
     ///
-    /// Each TEC's offsets drive the tapped delay line (control unit); its
-    /// bounded kernel drives the playing unit. With `balanced`, the playing
-    /// lines spread their rows over the span of the longest line, aligning
-    /// their ends; otherwise every line keeps the base pitch.
+    /// Each TEC's offsets drive the tapped delay line (control unit); its bounded
+    /// kernel drives the playing unit. With `balanced`, the playing lines spread
+    /// their rows toward the longest line's span in whole base pitches;
+    /// otherwise every line keeps the base pitch.
     pub fn new<I: IntoIterator<Item = BoundedTec<Tone>>>(
         tecs: I,
         wrap_length: Option<NonZero<usize>>,
@@ -51,11 +51,8 @@ impl TappedLayout {
                 .kernel
                 .into_notes()
                 .into_iter()
-                .flat_map(|(tick, tones)| {
-                    tones
-                        .into_iter()
-                        .map(move |tone| (tick + 2 * lyr as u32, tone))
-                });
+                .map(|(tick, tones)| (tick + 2 * lyr as u32, tones))
+                .flat_map(|(tick, tones)| tones.into_iter().map(move |tone| (tick, tone)));
             let raw = CompactLayout::raw(notes, repeater_coarse, wrap_length);
 
             // the bottom line carries the switch
