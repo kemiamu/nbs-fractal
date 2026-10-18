@@ -26,7 +26,7 @@ Example: `fix: keep wrapped linear rows one fixed size`
 - Indentation within a function, counting the level the function itself introduces, must not exceed three levels; two levels is preferred.
 - Keep single-line `if` as `if`; only use `match { true/false }` when it spans multiple lines.
 - Do not split logic into many small helper methods; keep a routine cohesive.
-- Document intent in doc comments, not in the body. A doc comment opens with a single summary paragraph describing purpose and use, without implementation detail.
+- A doc comment opens with a single summary paragraph describing purpose and use, without implementation detail.
 
 ## Import Statements
 

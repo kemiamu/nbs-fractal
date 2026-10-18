@@ -2,7 +2,8 @@
 
 use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, observer};
 use super::blocks::{redstone_torch, redstone_wire, repeater, wire_state};
-use super::{Arranged, Axis, EdgeArranged, Layout, LayoutExt, WithFloor, compact::CompactLayout};
+use super::compact::{CompactLayout, RawCompact};
+use super::{Arranged, Axis, EdgeArranged, Layout, LayoutExt, WithFloor};
 use crate::{BlockState, RedStoneTick, analysis::BoundedTec};
 use mcdata::util::BlockPos;
 use rsnbs::note::{Instrument, Key, Tone};
@@ -24,22 +25,25 @@ pub struct TappedLayout {
 }
 
 impl TappedLayout {
-    /// Build the composite layout from bounded TEC data.
+    /// Builds the composite layout from bounded TEC data.
     ///
-    /// Each TEC's offsets drive the tapped delay line (control unit);
-    /// its bounded kernel drives the playing unit.
+    /// Each TEC's offsets drive the tapped delay line (control unit); its bounded
+    /// kernel drives the playing unit. With `balanced`, the playing lines spread
+    /// their rows toward the longest line's span in whole base pitches;
+    /// otherwise every line keeps the base pitch.
     pub fn new<I: IntoIterator<Item = BoundedTec<Tone>>>(
         tecs: I,
         wrap_length: Option<NonZero<usize>>,
         gap: u32,
         full: bool,
+        balanced: bool,
     ) -> Self {
         let tecs: Vec<BoundedTec<Tone>> = tecs.into_iter().collect();
         let count = tecs.len();
         let mut tap_lines = Vec::new();
-        let mut layouts = Vec::new();
+        let mut raws = Vec::new();
 
-        // kernel -> compact layout
+        // kernel -> raw compact rows
         for (lyr, tec) in tecs.into_iter().enumerate() {
             let tec = tec.into_inner();
             let repeater_coarse = tec.min_gap().and_then(|gap| NonZero::new(gap / 2));
@@ -47,18 +51,28 @@ impl TappedLayout {
                 .kernel
                 .into_notes()
                 .into_iter()
-                .flat_map(|(tick, tones)| {
-                    tones
-                        .into_iter()
-                        .map(move |tone| (tick + 2 * lyr as u32, tone))
-                });
-            let layout = CompactLayout::new(notes, repeater_coarse, wrap_length, gap);
+                .map(|(tick, tones)| (tick + 2 * lyr as u32, tones))
+                .flat_map(|(tick, tones)| tones.into_iter().map(move |tone| (tick, tone)));
+            let raw = CompactLayout::raw(notes, repeater_coarse, wrap_length);
 
             // the bottom line carries the switch
             let switch = lyr + 1 == count;
             tap_lines.push(TapLine::new(tec.scatter, repeater_coarse, switch));
-            layouts.push(WithFloor::new(layout, full));
+            raws.push(raw);
         }
+
+        // rows -> compact layouts, balanced across the longest line
+        let most = match balanced {
+            true => raws.iter().map(RawCompact::rows).max().unwrap_or(0),
+            false => 0,
+        };
+        let mut layouts: Vec<_> = raws
+            .into_iter()
+            .map(|raw| {
+                let width = raw.balanced_width(most, gap);
+                WithFloor::new(raw.into_layout(width), full)
+            })
+            .collect();
 
         // signal propagates upward, so lower layers need more delay
         tap_lines.reverse();
