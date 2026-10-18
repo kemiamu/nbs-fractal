@@ -67,6 +67,15 @@ impl<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Events<I> {
         }
     }
 
+    /// Takes up to `N` notes, leaving the rest in the stream.
+    pub fn take_notes<const N: usize>(&mut self, count: usize) -> [Option<Tone>; N] {
+        let mut cap = [None; N];
+        for slot in cap.iter_mut().take(count.min(N)) {
+            *slot = Some(self.take_note());
+        }
+        cap
+    }
+
     fn refresh(&mut self) -> Option<()> {
         debug_assert!(self.cache.is_empty() && self.wait == 0);
         let (tick, notes) = Self::load(&mut self.notes)?;
@@ -181,8 +190,8 @@ impl Joint {
         let placed = bought.map_or(count, |_| 0);
         let joint = match (cap > 0, terminal) {
             (true, _) => Self::hold(stem, cap),
-            (false, true) => Self::sink(stem, Self::load(events, placed), state.raised),
-            (false, false) => Self::node(stem, Self::load(events, placed), state.raised),
+            (false, true) => Self::sink(stem, events.take_notes(placed), state.raised),
+            (false, false) => Self::node(stem, events.take_notes(placed), state.raised),
         };
 
         state.terminal = matches!(joint, Self::Sink { .. } | Self::DelayedSink { .. });
@@ -214,18 +223,6 @@ impl Joint {
             0 => Self::Node { raised, cap },
             stem => Self::DelayedNode { stem, cap },
         }
-    }
-
-    /// Takes up to `N` notes for a cap, leaving the rest in the stream.
-    fn load<const N: usize, I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
-        events: &mut Events<I>,
-        count: usize,
-    ) -> [Option<Tone>; N] {
-        let mut cap = [None; N];
-        for slot in cap.iter_mut().take(count.min(N)) {
-            *slot = Some(events.take_note());
-        }
-        cap
     }
 
     // Query methods...
