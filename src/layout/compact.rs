@@ -73,10 +73,18 @@ impl CompactLayout {
         let coarse = repeater_coarse.map_or(RedStoneTick::MAX, NonZero::get);
         let len = wrap_length.map_or(usize::MAX, NonZero::get);
         let mut events = Events::new(notes.into_iter().peekable(), RedStoneTick::MAX);
+        let mut state = State::default();
         let mut south_bound = false;
         let rows = iter::from_fn(|| {
             south_bound = !south_bound;
-            RawRow::emit(&mut events, coarse, wrap_length, len, south_bound)
+            RawRow::emit(
+                &mut events,
+                &mut state,
+                coarse,
+                wrap_length,
+                len,
+                south_bound,
+            )
         })
         .collect();
         RawCompact { rows }
@@ -137,14 +145,15 @@ struct RawRow {
 impl RawRow {
     fn emit<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
         events: &mut Events<I>,
+        state: &mut State,
         coarse: RedStoneTick,
         wrap_length: Option<NonZero<usize>>,
         len: usize,
         south_bound: bool,
     ) -> Option<Self> {
-        let (turn, mut state) = Turn::next(events, coarse, len == 1)?;
+        let turn = Turn::next(events, state, coarse, len == 1)?;
         let joints: Vec<Joint> = (1..len)
-            .map_while(|column| Joint::next(events, &mut state, coarse, column + 1 == len))
+            .map_while(|column| Joint::next(events, state, coarse, column + 1 == len))
             .collect();
         let columns = wrap_length.map_or(joints.len() + 1, NonZero::get);
         Some(Self {
@@ -183,6 +192,8 @@ impl RawRow {
 enum Turn {
     /// Bare wire sinking two notes into this row's chain.
     Sink {
+        /// Whether the input side raises this wire.
+        raised: bool,
         /// Ticks in the stem.
         stem: RedStoneTick,
         /// Notes played on the cap.
@@ -190,6 +201,8 @@ enum Turn {
     },
     /// Bare wire riding upward and one note on the cap.
     Node {
+        /// Whether the input side raises this wire.
+        raised: bool,
         /// Ticks in the stem.
         stem: RedStoneTick,
         /// Note played on the cap.
@@ -198,40 +211,40 @@ enum Turn {
 }
 
 impl Turn {
-    /// Draws the next turn from `events` and seeds the input state of the joints
-    /// that follow, or returns `None` when the stream has no notes left.
+    /// Draws the next turn from `events`, carrying `state` across, or returns
+    /// `None` when the stream has no notes left.
     fn next<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
         events: &mut Events<I>,
+        state: &mut State,
         coarse: RedStoneTick,
         closing: bool,
-    ) -> Option<(Self, State)> {
+    ) -> Option<Self> {
         let (wait, count) = events.pending()?;
         let stem = wait.min(coarse.min(4));
         let feeds = closing && (wait > stem || count > 2 || events.has_next_group());
         let terminal = !feeds && (wait > 0 || count <= 2);
         events.take_waits(stem);
+        let raised = state.raised;
         let turn = match (terminal, wait > stem) {
-            (true, true) => Self::sink(stem, [None; 2]),
-            (true, false) => Self::sink(stem, events.take_notes(count)),
-            (false, true) => Self::node(stem, None),
-            (false, false) => Self::node(stem, Some(events.take_note())),
+            (true, true) => Self::sink(stem, [None; 2], raised),
+            (true, false) => Self::sink(stem, events.take_notes(count), raised),
+            (false, true) => Self::node(stem, None, raised),
+            (false, false) => Self::node(stem, Some(events.take_note()), raised),
         };
-        let state = State {
-            terminal: matches!(turn, Self::Sink { .. }),
-            raised: matches!(turn, Self::Node { .. }),
-            chained: false,
-        };
-        Some((turn, state))
+        state.terminal = matches!(turn, Self::Sink { .. });
+        state.raised = matches!(turn, Self::Node { .. });
+        state.chained = false;
+        Some(turn)
     }
 
     /// A turn sinking two notes into the row's chain.
-    fn sink(stem: RedStoneTick, cap: [Option<Tone>; 2]) -> Self {
-        Self::Sink { stem, cap }
+    fn sink(stem: RedStoneTick, cap: [Option<Tone>; 2], raised: bool) -> Self {
+        Self::Sink { stem, cap, raised }
     }
 
     /// A turn riding the wire into the next row.
-    fn node(stem: RedStoneTick, cap: Option<Tone>) -> Self {
-        Self::Node { stem, cap }
+    fn node(stem: RedStoneTick, cap: Option<Tone>, raised: bool) -> Self {
+        Self::Node { stem, cap, raised }
     }
 
     /// Ticks the stem delays.
@@ -241,16 +254,25 @@ impl Turn {
         }
     }
 
+    /// Whether the input side raises this turn's bare wire.
+    fn raised(&self) -> bool {
+        match *self {
+            Self::Sink { raised, .. } | Self::Node { raised, .. } => raised,
+        }
+    }
+
     /// The wire a turn rides at `local_x`: its cap climbs onto the wire at the
-    /// inside end, while the outside end climbs onto the previous row.
+    /// inside end, while the outside end meets the previous row flat or lifted
+    /// as that row's output demands.
     fn wire(&self, local_x: i32, frame: &Frame) -> BlockState {
         use WireConn::*;
         let is_node = matches!(self, Self::Node { .. });
         let inside = if is_node { Up } else { Side };
+        let outside = if self.raised() { Up } else { Side };
         let west_end = frame.width - 1;
         let (west, east, forward) = match local_x {
             2 => (Side, inside, Idle),
-            x if x == west_end => (Idle, Side, Up),
+            x if x == west_end => (Idle, Side, outside),
             _ => (Side, Side, Idle),
         };
         let (north, south) = match frame.south_bound {
