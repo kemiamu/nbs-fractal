@@ -157,9 +157,9 @@ impl TapLine {
         let local_easting = self.size.x - pos.x - 1;
         let local_elevation = pos.y;
         let port_wire = || {
-            let switch_south = if self.switch { None } else { Side };
-            let switch_west = if self.switch { Side } else { None };
-            wire_state(switch_west, Side, None, switch_south, "0")
+            let switch_south = if self.switch { Idle } else { Side };
+            let switch_west = if self.switch { Side } else { Idle };
+            wire_state(switch_west, Side, Idle, switch_south, "0")
         };
 
         match (local_easting, local_elevation) {
@@ -179,16 +179,16 @@ impl TapLine {
     /// The blocks the port can draw: its torches, its switch hardware, and the
     /// wire link that closes the line.
     fn port_palette(&self) -> HashSet<BlockState> {
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         let (switch_west, switch_south) = match self.switch {
-            true => (Side, Open),
-            false => (Open, Side),
+            true => (Side, Idle),
+            false => (Idle, Side),
         };
         HashSet::from([
             chain_block(),
             redstone_torch(Option::None::<&'static str>, true),
             redstone_torch(Option::None::<&'static str>, false),
-            wire_state(switch_west, Side, Open, switch_south, "0"),
+            wire_state(switch_west, Side, Idle, switch_south, "0"),
             repeater("4", Facing::East, false, false),
             observer("west"),
             switch_button(),
@@ -268,10 +268,10 @@ impl<Ctx> Layout<Ctx> for Tap {
             (3.., 1, 1, 2) => Some(repeater(cycle(3, 8), Facing::East, false, false)),
             (2, 1, 0, 2) if delay < 11 => Some(redstone_wire()),
             (2, 1, 0, 2) => Some(repeater(decay(10), Facing::East, false, false)),
-            (2, 2.., 0, 2) if phase() < 4 => Some(wire_state(Side, Side, None, None, "15")),
+            (2, 2.., 0, 2) if phase() < 4 => Some(wire_state(Side, Side, Idle, Idle, "15")),
             (2, 2.., 0, 2) => Some(repeater(cycle(3, 8), Facing::West, true, false)),
             (3.., 1, 0, 2) => Some(repeater("3", Facing::West, true, false)),
-            (0, _, 1, 2) => Some(wire_state(None, None, Side, Side, "0")),
+            (0, _, 1, 2) => Some(wire_state(Idle, Idle, Side, Side, "0")),
             (0, _, 0, 2) => Some(repeater(decay(3), Facing::North, false, false)),
             _ => Option::None,
         }
@@ -285,7 +285,7 @@ impl<Ctx> Layout<Ctx> for Tap {
     /// wire links that carry its tapped delay.
     fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{East, North, West};
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         let delay = self.delay.get();
         let clamp = |tick: Tick| tick.min(4).to_string();
         let cycle = |off: Tick, modu: Tick| clamp((delay + off) % modu);
@@ -303,8 +303,8 @@ impl<Ctx> Layout<Ctx> for Tap {
             repeater(cycle(3, 8), East, false, false),
             repeater(cycle(3, 8), West, true, false),
             redstone_wire(),
-            wire_state(Open, Open, Side, Side, "0"),
-            wire_state(Side, Side, Open, Open, "15"),
+            wire_state(Idle, Idle, Side, Side, "0"),
+            wire_state(Side, Side, Idle, Idle, "15"),
         ])
     }
 }

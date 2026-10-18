@@ -473,9 +473,9 @@ impl Layout<Frame> for Turn {
             return Option::None;
         }
         match (pos.y, frame.width - 1 - pos.x, frame.south_bound) {
-            (1, 1, true) => Some(wire_state(Side, None, None, Side, "0")),
-            (1, 1, false) => Some(wire_state(Side, None, Side, None, "0")),
-            (1, 2.., _) => Some(wire_state(Side, Side, None, None, "0")),
+            (1, 1, true) => Some(wire_state(Side, Idle, Idle, Side, "0")),
+            (1, 1, false) => Some(wire_state(Side, Idle, Side, Idle, "0")),
+            (1, 2.., _) => Some(wire_state(Side, Side, Idle, Idle, "0")),
             (0, 1.., _) => Some(chain_block()),
             _ => Option::None,
         }
@@ -490,12 +490,12 @@ impl Layout<Frame> for Turn {
         if !self.connected {
             return HashSet::new();
         }
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         HashSet::from([
             chain_block(),
-            wire_state(Side, Open, Open, Side, "0"),
-            wire_state(Side, Open, Side, Open, "0"),
-            wire_state(Side, Side, Open, Open, "0"),
+            wire_state(Side, Idle, Idle, Side, "0"),
+            wire_state(Side, Idle, Side, Idle, "0"),
+            wire_state(Side, Side, Idle, Idle, "0"),
         ])
     }
 }

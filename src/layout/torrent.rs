@@ -310,12 +310,12 @@ impl Layout<Vec<(i32, i32)>> for Template {
         }
 
         // Provide circuit support for note blocks on the sides
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         let west = self.slots.contains_key(&(tx, ty, -1));
         let east = self.slots.contains_key(&(tx, ty, 1));
         match west || east {
             true => Some(chain_block()),
-            false => Some(wire_state(Open, Open, Side, Side, "0")),
+            false => Some(wire_state(Idle, Idle, Side, Side, "0")),
         }
     }
 
@@ -326,12 +326,12 @@ impl Layout<Vec<(i32, i32)>> for Template {
     /// The blocks a slice can draw: the fixed circuit row plus one note and one
     /// instrument block per stored voice.
     fn block_palette_with(&self, _tracks: &Vec<(i32, i32)>) -> HashSet<BlockState> {
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         let mut palette = HashSet::from([
             drive_repeater(),
             barrier(),
             chain_block(),
-            wire_state(Open, Open, Side, Side, "0"),
+            wire_state(Idle, Idle, Side, Side, "0"),
         ]);
         for tone in self.slots.values() {
             palette.insert(note_block(Some(tone), air));

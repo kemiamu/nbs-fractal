@@ -123,13 +123,13 @@ impl Template {
 impl<Ctx> Layout<Ctx> for Template {
     fn block_at_with(&self, pos: BlockPos, _ctx: &Ctx) -> Option<BlockState> {
         use Facing::{East, South};
-        use WireConn::{None as Air, Side};
+        use WireConn::*;
         let g = pos.x as usize / 2;
         let [first, second] = self.groups[g];
-        let wire = || wire_state(Side, Side, Air, Air, "0");
+        let wire = || wire_state(Side, Side, Idle, Idle, "0");
         let drive = || repeater(self.delay(g).to_string(), East, false, false);
-        let east = if self.continues(0) { Side } else { Air };
-        let dust = wire_state(Air, east, Side, Side, "0");
+        let east = if self.continues(0) { Side } else { Idle };
+        let dust = wire_state(Idle, east, Side, Side, "0");
 
         // Main line: the spine on columns 0 and 1, plus the clock pass-through.
         let main = |y: i32| match (pos.z, pos.x, y) {
@@ -167,13 +167,13 @@ impl<Ctx> Layout<Ctx> for Template {
     /// group, and one note and instrument block per stored tone.
     fn block_palette_with(&self, _ctx: &Ctx) -> HashSet<BlockState> {
         use Facing::{East, South};
-        use WireConn::{None as Open, Side};
+        use WireConn::*;
         let mut palette = HashSet::from([
             chain_block(),
             repeater("4", South, false, false),
-            wire_state(Side, Side, Open, Open, "0"),
-            wire_state(Open, Side, Side, Side, "0"),
-            wire_state(Open, Open, Side, Side, "0"),
+            wire_state(Side, Side, Idle, Idle, "0"),
+            wire_state(Idle, Side, Side, Side, "0"),
+            wire_state(Idle, Idle, Side, Side, "0"),
         ]);
         let driven = (1..4).filter(|&g| self.filled(g));
         for g in driven {
