@@ -3,7 +3,8 @@
 //! A compact line is built from [`Joint`]s, each a bamboo joint whose stem carries
 //! the repeaters and whose cap carries the note blocks. Joints stack end to end
 //! into one long culm, and each is read within the row's south-bound flag, so it
-//! learns the facing from its parent instead of storing it.
+//! learns the facing from its parent instead of storing it. [`Joint::next`] draws
+//! them one at a time from a shared [`Events`] stream.
 
 use super::blocks::{Facing, WireConn, chain_block, inst_block, note_block, repeater, wire_state};
 use super::{Layout, air};
@@ -13,68 +14,8 @@ use rsnbs::note::Tone;
 use std::collections::HashSet;
 use std::iter::{self, Peekable};
 
-// Emitter & Events
+// Events
 // ++++++++++++============++++++++++++============++++++++++++============
-
-struct Emitter<'a, I: Iterator> {
-    events: &'a mut Events<I>,
-    coarse: RedStoneTick,
-    terminal: bool,
-    chained: bool,
-    raised: bool,
-}
-
-impl<'a, I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Emitter<'a, I> {
-    fn new(events: &'a mut Events<I>, coarse: RedStoneTick) -> Self {
-        Self {
-            events,
-            coarse,
-            terminal: false,
-            chained: false,
-            raised: false,
-        }
-    }
-
-    fn joint(&mut self, closing: bool) -> Option<Joint> {
-        debug_assert!(!(self.coarse == 1 && self.chained));
-
-        let (wait, count) = self.events.pending()?;
-        let bought = match (self.coarse, self.chained, closing) {
-            (c @ 2..=4, false, _) if wait == c * 3 => Some((c, 0)),
-            (c @ 2..=4, _, false) if wait > c * 2 => Some((c, c)),
-            (c @ 2..=4, true, _) if wait == c * 2 => Some((c, 1)),
-            (c @ 2..=4, true, _) if wait >= c => Some((c - 1, 0)),
-            (c @ 1..=4, false, _) if wait > c => Some((c, 0)),
-            (_, false, _) if wait > 8 => Some((4, 4)),
-            (_, false, _) if wait > 4 => Some((4, 0)),
-            _ => None,
-        };
-
-        let feeds = closing && (bought.is_some() || count > 3 || self.events.has_next_group());
-        let terminal = !feeds && (wait > 0 || (count <= 3 && !self.terminal));
-        let (stem, cap) = bought.unwrap_or((wait, 0));
-        self.events.take_waits(stem + cap);
-        let placed = bought.map_or(count, |_| 0);
-        let joint = match (cap > 0, terminal) {
-            (true, _) => Joint::hold(stem, cap),
-            (false, true) => Joint::sink(stem, self.load(placed), self.raised),
-            (false, false) => Joint::node(stem, self.load(placed), self.raised),
-        };
-
-        self.terminal = matches!(joint, Joint::Sink { .. } | Joint::DelayedSink { .. });
-        self.chained = matches!(joint, Joint::Hold { cap, .. } if cap == self.coarse);
-        self.raised = matches!(joint, Joint::Node { .. } | Joint::DelayedNode { .. });
-        Some(joint)
-    }
-
-    fn load<const N: usize>(&mut self, count: usize) -> [Option<Tone>; N] {
-        let mut cap = [None; N];
-        for slot in cap.iter_mut().take(count.min(N)) {
-            *slot = Some(self.events.take_note());
-        }
-        cap
-    }
-}
 
 /// Notes and waits expanded from grouped input: the waits between groups and
 /// the notes of each group.
@@ -124,6 +65,15 @@ impl<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>> Events<I> {
             Some(Some(note)) => note,
             _ => unreachable!(),
         }
+    }
+
+    /// Takes up to `N` notes, leaving the rest in the stream.
+    pub fn take_notes<const N: usize>(&mut self, count: usize) -> [Option<Tone>; N] {
+        let mut cap = [None; N];
+        for slot in cap.iter_mut().take(count.min(N)) {
+            *slot = Some(self.take_note());
+        }
+        cap
     }
 
     fn refresh(&mut self) -> Option<()> {
@@ -206,6 +156,49 @@ pub enum Joint {
 
 impl Joint {
     // Constructors...
+
+    /// Draws the next joint from `events`, carrying `state` across, or `None`
+    /// when the stream has no notes left.
+    ///
+    /// `coarse` bounds how many stem ticks one repeater chain may hold, and
+    /// `closing` marks the last joint of a culm, which may settle on a sink
+    /// rather than feed on.
+    pub fn next<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
+        events: &mut Events<I>,
+        state: &mut State,
+        coarse: RedStoneTick,
+        closing: bool,
+    ) -> Option<Self> {
+        debug_assert!(!(coarse == 1 && state.chained));
+
+        let (wait, count) = events.pending()?;
+        let bought = match (coarse, state.chained, closing) {
+            (c @ 2..=4, false, _) if wait == c * 3 => Some((c, 0)),
+            (c @ 2..=4, _, false) if wait > c * 2 => Some((c, c)),
+            (c @ 2..=4, true, _) if wait == c * 2 => Some((c, 1)),
+            (c @ 2..=4, true, _) if wait >= c => Some((c - 1, 0)),
+            (c @ 1..=4, false, _) if wait > c => Some((c, 0)),
+            (_, false, _) if wait > 8 => Some((4, 4)),
+            (_, false, _) if wait > 4 => Some((4, 0)),
+            _ => None,
+        };
+
+        let feeds = closing && (bought.is_some() || count > 3 || events.has_next_group());
+        let terminal = !feeds && (wait > 0 || (count <= 3 && !state.terminal));
+        let (stem, cap) = bought.unwrap_or((wait, 0));
+        events.take_waits(stem + cap);
+        let placed = bought.map_or(count, |_| 0);
+        let joint = match (cap > 0, terminal) {
+            (true, _) => Self::hold(stem, cap),
+            (false, true) => Self::sink(stem, events.take_notes(placed), state.raised),
+            (false, false) => Self::node(stem, events.take_notes(placed), state.raised),
+        };
+
+        state.terminal = matches!(joint, Self::Sink { .. } | Self::DelayedSink { .. });
+        state.chained = matches!(joint, Self::Hold { cap, .. } if cap == coarse);
+        state.raised = matches!(joint, Self::Node { .. } | Self::DelayedNode { .. });
+        Some(joint)
+    }
 
     /// A joint holding its cap repeater for `cap` extra ticks.
     pub fn hold(stem: RedStoneTick, cap: RedStoneTick) -> Self {
@@ -322,7 +315,47 @@ impl Layout<bool> for Joint {
 
     /// The blocks a joint can draw: its stem and cap repeaters, the wire it rides
     /// on, and one note and instrument block per stored tone.
-    fn block_palette_with(&self, _ctx: &bool) -> HashSet<BlockState> {
-        todo!()
+    fn block_palette_with(&self, &south_bound: &bool) -> HashSet<BlockState> {
+        use Facing::{North, South};
+        use WireConn::{Idle, Side};
+        let facing = match south_bound {
+            true => South,
+            false => North,
+        };
+        let repeater = |delay: RedStoneTick| repeater(delay.to_string(), facing, false, false);
+        let mut palette = HashSet::from([chain_block()]);
+        if matches!(self, Joint::Sink { .. } | Joint::Node { .. }) {
+            palette.insert(self.wire(south_bound));
+        }
+        if matches!(self, Joint::Node { .. }) {
+            palette.insert(wire_state(Idle, Idle, Side, Side, "0"));
+        }
+        if self.stem() > 0 {
+            palette.insert(repeater(self.stem()));
+        }
+        if let Joint::Hold { cap, .. } = *self {
+            palette.insert(repeater(cap));
+        }
+        let caps: &[Option<Tone>] = match self {
+            Joint::Hold { .. } => &[],
+            Joint::Node { cap, .. } | Joint::DelayedNode { cap, .. } => cap,
+            Joint::Sink { cap, .. } | Joint::DelayedSink { cap, .. } => cap,
+        };
+        for tone in caps.iter().flatten() {
+            palette.insert(note_block(Some(tone), air));
+            palette.insert(inst_block(Some(tone), air));
+        }
+        palette
     }
+}
+
+/// The input conditions a joint must be given before it can be built.
+#[derive(Clone, Copy, Default)]
+pub struct State {
+    /// Whether the input needs lifting onto the joint's wire.
+    pub raised: bool,
+    /// Whether the input arrives as a block charge.
+    pub terminal: bool,
+    /// Whether the input repeater's scheduled-tick priority is too low.
+    pub chained: bool,
 }

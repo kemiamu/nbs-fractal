@@ -46,7 +46,7 @@ impl ToneBlocks for Tone {
         }
         let block = self.instrument.block_resource().unwrap();
         let properties = match self.instrument {
-            Instrument::Banjo => From::from([("axis".into(), "y".into())]),
+            Instrument::Banjo | Instrument::Xylophone => From::from([("axis".into(), "y".into())]),
             _ => BTreeMap::new(),
         };
         Some(BlockState {
