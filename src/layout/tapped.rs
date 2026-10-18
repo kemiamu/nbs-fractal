@@ -95,8 +95,8 @@ impl Layout<()> for TappedLayout {
             false => (pos - BlockPos::new(divide, 0, 0), self.playing.size()),
         };
         let dispatch = || match side {
-            true => self.control.get_block(local),
-            false => self.playing.get_block(local),
+            true => self.control.block_at(local),
+            false => self.playing.block_at(local),
         };
         (local.y < size.y && local.z < size.z).then(dispatch)?
     }
@@ -200,7 +200,7 @@ impl<Ctx> Layout<Ctx> for TapLine {
     fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
         match pos.z == 0 {
             true => self.port(pos),
-            false => self.delays.try_get_block_with(pos - self.anchor, ctx),
+            false => self.delays.get_block_with(pos - self.anchor, ctx),
         }
     }
 
