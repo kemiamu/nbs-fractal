@@ -172,36 +172,41 @@ impl<Ctx> Layout<Ctx> for Box<dyn Layout<Ctx> + '_> {
     }
 }
 
-/// Implements [`Layout`] on a wrapper by forwarding every query to its inner
-/// layout `.0`.
+/// Implements [`Layout`] on a wrapper by forwarding every query to one of its
+/// fields: the first, `.0`, unless a field name or index is given as the third
+/// argument.
 ///
 /// Rust rejects the blanket impl that would make this automatic: it cannot rule
 /// out a downstream impl overlapping a hand-written one, however private the
 /// wrapper, so each wrapper states its delegation here in one line.
 ///
 /// Exported for downstream crates, which use it the same way:
-/// `forward_layout!(MyWrapper, ());`.
+/// `forward_layout!(MyWrapper, ());` forwards to `.0` and
+/// `forward_layout!(MyWrapper, (), inner);` to `inner`.
 #[macro_export]
 macro_rules! forward_layout {
     ($ty:ty, $ctx:ty) => {
+        $crate::forward_layout!($ty, $ctx, 0);
+    };
+    ($ty:ty, $ctx:ty, $field:tt) => {
         impl $crate::layout::Layout<$ctx> for $ty {
             fn block_at_with(
                 &self,
                 pos: ::mcdata::util::BlockPos,
                 ctx: &$ctx,
             ) -> Option<$crate::BlockState> {
-                self.0.block_at_with(pos, ctx)
+                self.$field.block_at_with(pos, ctx)
             }
 
             fn size_with(&self, ctx: &$ctx) -> ::mcdata::util::BlockPos {
-                self.0.size_with(ctx)
+                self.$field.size_with(ctx)
             }
 
             fn block_palette_with(
                 &self,
                 ctx: &$ctx,
             ) -> ::std::collections::HashSet<$crate::BlockState> {
-                self.0.block_palette_with(ctx)
+                self.$field.block_palette_with(ctx)
             }
         }
     };
@@ -342,7 +347,8 @@ impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for EdgeArranged<L> {
 ///
 /// Query cost is O(k) with `k` the candidate window width, independent of
 /// the item count. The window is the least that still reaches every item's
-/// covering cell, so `k` is minimal. `pitch` must be non-zero.
+/// covering cell, so `k` is minimal. `pitch` must be non-zero; an empty
+/// arrangement covers nothing and reports zero size.
 pub struct EvenlyArranged<L> {
     /// Sub-layouts in lattice order; item `i` sits at `i * pitch`.
     items: Vec<L>,
@@ -359,7 +365,7 @@ pub struct EvenlyArranged<L> {
     /// covering item, `floor((L - M) / spacing)` with `L = |pitch|.extent` and
     /// `M = |pitch|.ones`.
     span: i32,
-    /// Bounding box size: `pitch.abs() * (len - 1) + extent`.
+    /// Bounding box size: `pitch.abs() * (len - 1) + extent`, zero when empty.
     size: BlockPos,
 }
 
@@ -375,7 +381,7 @@ impl<L> EvenlyArranged<L> {
             .iter()
             .map(|item| item.size_with(ctx))
             .fold(BlockPos::ORIGIN, include);
-        let far = items.len() as i32 - 1;
+        let far = (items.len() as i32 - 1).max(0);
 
         let inner = include(extent - BlockPos::new(1, 1, 1), BlockPos::ORIGIN);
         let fore = include(pitch, BlockPos::ORIGIN);
