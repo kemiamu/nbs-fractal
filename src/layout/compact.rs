@@ -114,12 +114,14 @@ impl RawCompact {
     }
 
     /// The width that spreads this line's rows across the span of a line of
-    /// `most` rows, rounded down to whole base pitches.
+    /// `most` rows, rounding the row interval to the nearest block.
     pub fn balanced_width(&self, most: usize, gap: u32) -> i32 {
         let pitch = 2 + gap as i32;
         let rows = self.rows();
+        let intervals = (rows - 1) as i32;
+        let span = (most - 1) as i32 * pitch;
         match rows > 1 && most > 1 {
-            true => pitch * ((most - 1) / (rows - 1)) as i32 + 2,
+            true => (span + intervals / 2) / intervals + 2,
             false => 4 + gap as i32,
         }
     }
