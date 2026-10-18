@@ -28,9 +28,9 @@ impl TappedLayout {
     /// Builds the composite layout from bounded TEC data.
     ///
     /// Each TEC's offsets drive the tapped delay line (control unit); its bounded
-    /// kernel drives the playing unit. With `balanced`, the playing lines spread
-    /// their rows toward the longest line's span in whole base pitches;
-    /// otherwise every line keeps the base pitch.
+    /// kernel drives the playing unit. With `balanced`, the playing lines stretch
+    /// their row intervals so they fit within the longest line's span, flooring
+    /// the interval to whole blocks; otherwise every line keeps the base pitch.
     pub fn new<I: IntoIterator<Item = BoundedTec<Tone>>>(
         tecs: I,
         wrap_length: Option<NonZero<usize>>,
