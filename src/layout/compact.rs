@@ -105,6 +105,17 @@ impl RawCompact {
         self.rows.len()
     }
 
+    /// The width that spreads this line's rows across the span of a line of
+    /// `most` rows, rounded down to whole base pitches.
+    pub fn balanced_width(&self, most: usize, gap: u32) -> i32 {
+        let pitch = 2 + gap as i32;
+        let rows = self.rows();
+        match rows > 1 && most > 1 {
+            true => pitch * ((most - 1) / (rows - 1)) as i32 + 2,
+            false => 4 + gap as i32,
+        }
+    }
+
     /// Lays the emitted rows out as one line `width` blocks wide.
     pub fn into_layout(self, width: i32) -> CompactLayout {
         assert!(width >= 3, "a row needs a west stem and a two-wide cap");

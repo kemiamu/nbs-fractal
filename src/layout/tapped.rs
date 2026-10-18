@@ -2,7 +2,8 @@
 
 use super::blocks::{Facing, ToneBlocks, WireConn, chain_block, observer};
 use super::blocks::{redstone_torch, redstone_wire, repeater, wire_state};
-use super::{Arranged, Axis, EdgeArranged, Layout, LayoutExt, WithFloor, compact::CompactLayout};
+use super::compact::{CompactLayout, RawCompact};
+use super::{Arranged, Axis, EdgeArranged, Layout, LayoutExt, WithFloor};
 use crate::{BlockState, RedStoneTick, analysis::BoundedTec};
 use mcdata::util::BlockPos;
 use rsnbs::note::{Instrument, Key, Tone};
@@ -37,9 +38,9 @@ impl TappedLayout {
         let tecs: Vec<BoundedTec<Tone>> = tecs.into_iter().collect();
         let count = tecs.len();
         let mut tap_lines = Vec::new();
-        let mut layouts = Vec::new();
+        let mut raws = Vec::new();
 
-        // kernel -> compact layout
+        // kernel -> raw compact rows
         for (lyr, tec) in tecs.into_iter().enumerate() {
             let tec = tec.into_inner();
             let repeater_coarse = tec.min_gap().and_then(|gap| NonZero::new(gap / 2));
@@ -52,13 +53,23 @@ impl TappedLayout {
                         .into_iter()
                         .map(move |tone| (tick + 2 * lyr as u32, tone))
                 });
-            let layout = CompactLayout::new(notes, repeater_coarse, wrap_length, gap);
+            let raw = CompactLayout::raw(notes, repeater_coarse, wrap_length);
 
             // the bottom line carries the switch
             let switch = lyr + 1 == count;
             tap_lines.push(TapLine::new(tec.scatter, repeater_coarse, switch));
-            layouts.push(WithFloor::new(layout, full));
+            raws.push(raw);
         }
+
+        // rows -> balanced compact layouts
+        let most = raws.iter().map(RawCompact::rows).max().unwrap_or(0);
+        let mut layouts: Vec<_> = raws
+            .into_iter()
+            .map(|raw| {
+                let width = raw.balanced_width(most, gap);
+                WithFloor::new(raw.into_layout(width), full)
+            })
+            .collect();
 
         // signal propagates upward, so lower layers need more delay
         tap_lines.reverse();
