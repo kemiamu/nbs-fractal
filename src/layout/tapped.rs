@@ -25,15 +25,18 @@ pub struct TappedLayout {
 }
 
 impl TappedLayout {
-    /// Build the composite layout from bounded TEC data.
+    /// Builds the composite layout from bounded TEC data.
     ///
-    /// Each TEC's offsets drive the tapped delay line (control unit);
-    /// its bounded kernel drives the playing unit.
+    /// Each TEC's offsets drive the tapped delay line (control unit); its
+    /// bounded kernel drives the playing unit. With `balanced`, the playing
+    /// lines spread their rows over the span of the longest line, aligning
+    /// their ends; otherwise every line keeps the base pitch.
     pub fn new<I: IntoIterator<Item = BoundedTec<Tone>>>(
         tecs: I,
         wrap_length: Option<NonZero<usize>>,
         gap: u32,
         full: bool,
+        balanced: bool,
     ) -> Self {
         let tecs: Vec<BoundedTec<Tone>> = tecs.into_iter().collect();
         let count = tecs.len();
@@ -61,8 +64,11 @@ impl TappedLayout {
             raws.push(raw);
         }
 
-        // rows -> balanced compact layouts
-        let most = raws.iter().map(RawCompact::rows).max().unwrap_or(0);
+        // rows -> compact layouts, balanced across the longest line
+        let most = match balanced {
+            true => raws.iter().map(RawCompact::rows).max().unwrap_or(0),
+            false => 0,
+        };
         let mut layouts: Vec<_> = raws
             .into_iter()
             .map(|raw| {

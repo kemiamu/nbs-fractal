@@ -509,6 +509,9 @@ struct Tapped {
     /// Add a full floor platform below the build
     #[arg(short, long)]
     full_floor: bool,
+    /// Keep every playing line at the base pitch instead of aligning rows
+    #[arg(long = "no-balance")]
+    no_balance: bool,
 }
 
 impl Tapped {
@@ -534,7 +537,13 @@ impl Tapped {
             .map(restore)
             .collect();
 
-        let layout = TappedLayout::new(tecs, NonZero::new(self.wrap), self.gap, self.full_floor);
+        let layout = TappedLayout::new(
+            tecs,
+            NonZero::new(self.wrap),
+            self.gap,
+            self.full_floor,
+            !self.no_balance,
+        );
         let description = format!("Tapped from {}", self.input);
         write_schematic(layout, Floor::None, description, &self.output);
     }
