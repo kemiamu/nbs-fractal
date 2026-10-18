@@ -156,8 +156,8 @@ impl Joint {
     /// rather than feed on.
     pub fn next<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
         events: &mut Events<I>,
-        coarse: RedStoneTick,
         state: &mut State,
+        coarse: RedStoneTick,
         closing: bool,
     ) -> Option<Self> {
         debug_assert!(!(coarse == 1 && state.chained));
@@ -352,15 +352,13 @@ impl Layout<bool> for Joint {
     }
 }
 
-/// What one joint hands to the next: whether the last cap raises the next bare
-/// wire, whether the last joint has already sunk into its chain, and whether it
-/// held a whole coarse step.
+/// The input conditions a joint must be given before it can be built.
 #[derive(Clone, Copy, Default)]
 pub struct State {
-    /// Whether the last cap raises the next bare wire.
+    /// Whether the input needs lifting onto the joint's wire.
     pub raised: bool,
-    /// Whether the last joint has already sunk into its chain.
+    /// Whether the input arrives as a block charge.
     pub terminal: bool,
-    /// Whether the last joint held a whole coarse step.
+    /// Whether the input repeater's scheduled-tick priority is too low.
     pub chained: bool,
 }
