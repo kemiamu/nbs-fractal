@@ -344,7 +344,7 @@ struct Decompose {
     #[arg(default_value = "out/generated_decompose.tec.nbs")]
     output: String,
     /// Max number of layers (TECs) to generate (0 = no budget)
-    #[arg(short, long, default_value_t = 2)]
+    #[arg(short, long, default_value_t = 3)]
     layers: usize,
 }
 
