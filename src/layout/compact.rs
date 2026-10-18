@@ -51,22 +51,35 @@ forward_layout!(MultiCompactLayout, ());
 pub struct CompactLayout(Clipped<EvenlyArranged<Row>>);
 
 impl CompactLayout {
+    /// Builds one track's compact line at the given inter-track `gap`.
     pub fn new<I: IntoIterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
         notes: I,
         repeater_coarse: Option<NonZero<RedStoneTick>>,
         wrap_length: Option<NonZero<usize>>,
         gap: u32,
     ) -> Self {
-        let width = 4 + gap as i32;
+        Self::raw(notes, repeater_coarse, wrap_length).into_layout(4 + gap as i32)
+    }
+
+    /// Emits every row of one track without fixing the line's width.
+    ///
+    /// The rows carry only what the events decided; a caller that sizes several
+    /// lines together can count rows first, then build each line to fit.
+    pub fn raw<I: IntoIterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
+        notes: I,
+        repeater_coarse: Option<NonZero<RedStoneTick>>,
+        wrap_length: Option<NonZero<usize>>,
+    ) -> RawCompact {
         let coarse = repeater_coarse.map_or(RedStoneTick::MAX, NonZero::get);
+        let len = wrap_length.map_or(usize::MAX, NonZero::get);
         let mut events = Events::new(notes.into_iter().peekable(), RedStoneTick::MAX);
         let mut south_bound = false;
-        let rows = iter::from_fn(move || {
+        let rows = iter::from_fn(|| {
             south_bound = !south_bound;
-            Row::new(&mut events, width, coarse, wrap_length, south_bound)
-        });
-        let rows = EvenlyArranged::new(rows, BlockPos::new(width - 2, 0, 0), &());
-        Self(Clipped::new(rows, BlockPos::new(width - 3, 0, 0), &()))
+            RawRow::emit(&mut events, coarse, wrap_length, len, south_bound)
+        })
+        .collect();
+        RawCompact { rows }
     }
 }
 
@@ -75,53 +88,78 @@ forward_layout!(CompactLayout, ());
 /// One directional row of joints, read within the [`Frame`] it holds.
 struct Row(Provided<Frame, Overlaid<Turn, EvenlyArranged<Joint>>>);
 
-impl Row {
-    fn new<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
+forward_layout!(Row, ());
+
+// Raw: RawCompact & RawRow
+//
+// ++++++++++++============++++++++++++============++++++++++++============
+
+/// One track's emitted rows, before the line width and spacing are chosen.
+pub struct RawCompact {
+    rows: Vec<RawRow>,
+}
+
+impl RawCompact {
+    /// The number of rows the track packed into.
+    pub fn rows(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Lays the emitted rows out as one line `width` blocks wide.
+    pub fn into_layout(self, width: i32) -> CompactLayout {
+        assert!(width >= 3, "a row needs a west stem and a two-wide cap");
+        let pitch = BlockPos::new(width - 2, 0, 0);
+        let rows = self.rows.into_iter().map(|row| row.into_layout(width));
+        let rows = EvenlyArranged::new(rows, pitch, &());
+        CompactLayout(Clipped::new(rows, BlockPos::new(width - 3, 0, 0), &()))
+    }
+}
+
+/// One emitted row of joints, before width is chosen.
+struct RawRow {
+    turn: Turn,
+    joints: Vec<Joint>,
+    columns: usize,
+    south_bound: bool,
+}
+
+impl RawRow {
+    fn emit<I: Iterator<Item = (RedStoneTick, T)>, T: Into<Tone>>(
         events: &mut Events<I>,
-        width: i32,
         coarse: RedStoneTick,
         wrap_length: Option<NonZero<usize>>,
+        len: usize,
         south_bound: bool,
     ) -> Option<Self> {
-        let len = wrap_length.map_or(usize::MAX, NonZero::get);
         let (turn, mut state) = Turn::next(events, coarse, len == 1)?;
         let joints: Vec<Joint> = (1..len)
             .map_while(|column| Joint::next(events, &mut state, coarse, column + 1 == len))
             .collect();
+        let columns = wrap_length.map_or(joints.len() + 1, NonZero::get);
+        Some(Self {
+            turn,
+            joints,
+            columns,
+            south_bound,
+        })
+    }
 
-        let depth = wrap_length.map_or(joints.len() + 1, NonZero::get);
-        let size = BlockPos::new(width, 3, 2 * depth as i32);
+    fn into_layout(self, width: i32) -> Row {
+        let Self {
+            turn,
+            joints,
+            columns,
+            south_bound,
+        } = self;
+        let size = BlockPos::new(width, 3, 2 * columns as i32);
         let frame = Frame { width, south_bound };
         let pitch = if south_bound { 2 } else { -2 };
         let rest = EvenlyArranged::new(joints, BlockPos::new(0, 0, pitch), &frame);
         let turn_at = BlockPos::new(0, 0, if south_bound { 0 } else { -1 });
         let joints_at = BlockPos::new(-1, 0, if south_bound { 1 } else { -2 });
         let row = Overlaid::new(turn_at, turn, joints_at, rest, size, &frame);
-        Some(Self(Provided::new(frame, row)))
+        Row(Provided::new(frame, row))
     }
-}
-
-forward_layout!(Row, ());
-
-impl Layout<Frame> for Joint {
-    fn block_at_with(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
-        Layout::block_at_with(self, pos, &frame.south_bound)
-    }
-
-    fn size_with(&self, frame: &Frame) -> BlockPos {
-        Layout::size_with(self, &frame.south_bound)
-    }
-
-    fn block_palette_with(&self, frame: &Frame) -> HashSet<BlockState> {
-        Layout::block_palette_with(self, &frame.south_bound)
-    }
-}
-
-/// The row-level context every joint and turn in a row is read within: the width
-/// it spans and which way it faces.
-struct Frame {
-    width: i32,
-    south_bound: bool,
 }
 
 // Template: Turn
@@ -285,4 +323,25 @@ impl Layout<Frame> for Turn {
         }
         palette
     }
+}
+
+impl Layout<Frame> for Joint {
+    fn block_at_with(&self, pos: BlockPos, frame: &Frame) -> Option<BlockState> {
+        Layout::block_at_with(self, pos, &frame.south_bound)
+    }
+
+    fn size_with(&self, frame: &Frame) -> BlockPos {
+        Layout::size_with(self, &frame.south_bound)
+    }
+
+    fn block_palette_with(&self, frame: &Frame) -> HashSet<BlockState> {
+        Layout::block_palette_with(self, &frame.south_bound)
+    }
+}
+
+/// The row-level context every joint and turn in a row is read within: the width
+/// it spans and which way it faces.
+struct Frame {
+    width: i32,
+    south_bound: bool,
 }
