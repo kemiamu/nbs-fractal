@@ -20,9 +20,6 @@ litematica = "0.2.0"
 [dev-dependencies]
 # meow
 
-[patch.crates-io]
-litematica = { git = "https://github.com/Conflux-Union/litematica-rust" }
-
 [[bin]]
 name = "nbs-fractal"
 path = "src/bin/cli.rs"

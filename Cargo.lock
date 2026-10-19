@@ -195,7 +195,8 @@ dependencies = [
 [[package]]
 name = "litematica"
 version = "0.2.0"
-source = "git+https://github.com/Conflux-Union/litematica-rust#08c3d8b54fcd04bceafa17bb86af74d8e41252cf"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee7a129087e6eb0999a55b0d5a0829d65e7b7d63eba7116b171837f9edde9bc2"
 dependencies = [
  "flate2",
  "thiserror",
