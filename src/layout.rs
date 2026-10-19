@@ -249,49 +249,97 @@ impl<Ctx, L: Layout<Ctx>> Layout<()> for Provided<Ctx, L> {
 
 /// A layout wrapper that arranges sub-layouts along an [`Axis`].
 ///
-/// Query cost is O(log n) with `n` the number of sub-layouts: [`Layout::block_at_with`]
-/// locates the containing band via a binary search over the anchors, which are
-/// sorted along the arrangement axis.
+/// Each item is anchored `gap` past the far edge of the previous one, so the
+/// edge-to-edge spacing is fixed regardless of item size. A negative `gap`
+/// pulls items together: they overlap, and a later item covers an earlier one
+/// wherever both draw. The arrangement is shifted so its bounding box starts at
+/// the origin even when negative gaps push anchors backwards.
+///
+/// Query cost is O(log n) with `n` the number of sub-layouts while the anchors
+/// stay ordered along the axis, which every non-negative `gap` guarantees. A
+/// `gap` negative enough to reverse the anchors falls back to a linear scan.
 pub struct Arranged<L> {
     bands: Vec<(L, BlockPos)>,
+    /// Anchor of each band along the arrangement axis, in band order.
+    starts: Vec<i32>,
+    /// Running maximum of the far edges along the axis, for interval lookup.
+    ends: Vec<i32>,
+    /// Whether `starts` is non-decreasing and can be binary-searched.
+    ordered: bool,
+    axis: Axis,
     size: BlockPos,
 }
 
 impl<L> Arranged<L> {
-    pub fn new<Ctx, I>(layouts: I, axis: Axis, gap: u32, ctx: &Ctx) -> Self
+    pub fn new<Ctx, I>(layouts: I, axis: Axis, gap: i32, ctx: &Ctx) -> Self
     where
         I: IntoIterator<Item = L>,
         L: Layout<Ctx>,
     {
         let unit: Mask = axis.unit();
-        let gap_vec: BlockPos = unit * gap as i32;
-        let mut cursor: BlockPos = -gap_vec;
+        let mut cursor: i32 = 0;
+        let mut start_min: i32 = 0;
+        let mut far_max: i32 = 0;
         let mut extent: BlockPos = BlockPos::ORIGIN;
+        let mut placed = Vec::new();
 
-        let placed = layouts.into_iter().map(|layout| {
+        for layout in layouts {
             let size: BlockPos = layout.size_with(ctx);
-            let anchor: BlockPos = cursor + gap_vec;
-            cursor = anchor + unit * size;
+            let start = cursor;
+            let far = start + unit.dot(size);
+            cursor = far + gap;
+            start_min = start_min.min(start);
+            far_max = far_max.max(far);
             extent = include(extent, size);
-            (layout, anchor)
-        });
+            placed.push((layout, start, far));
+        }
 
-        let bands = placed.collect();
-        let size = include(include(cursor, BlockPos::ORIGIN), extent);
-        Self { bands, size }
+        let shift = -start_min;
+        let mut starts = Vec::with_capacity(placed.len());
+        let mut ends = Vec::with_capacity(placed.len());
+        let mut reach = i32::MIN;
+        let mut bands = Vec::with_capacity(placed.len());
+        for (layout, start, far) in placed {
+            let start = start + shift;
+            let far = far + shift;
+            reach = reach.max(far);
+            starts.push(start);
+            ends.push(reach);
+            bands.push((layout, unit * start));
+        }
+        let ordered = starts.windows(2).all(|pair| pair[0] <= pair[1]);
+
+        let span = far_max - start_min;
+        let size = match axis {
+            Axis::Easting => BlockPos::new(span, extent.y, extent.z),
+            Axis::Elevation => BlockPos::new(extent.x, span, extent.z),
+            Axis::Southing => BlockPos::new(extent.x, extent.y, span),
+        };
+        Self {
+            bands,
+            starts,
+            ends,
+            ordered,
+            axis,
+            size,
+        }
     }
 }
 
 impl<Ctx, L: Layout<Ctx>> Layout<Ctx> for Arranged<L> {
     fn block_at_with(&self, pos: BlockPos, ctx: &Ctx) -> Option<BlockState> {
-        let index = self
-            .bands
-            .partition_point(|(_, a)| a.y <= pos.y && a.z <= pos.z && a.x <= pos.x)
-            .checked_sub(1)?;
-
-        let (layout, anchor) = &self.bands[index];
-        let local = BlockPos::new(pos.x - anchor.x, pos.y - anchor.y, pos.z - anchor.z);
-        layout.get_block_with(local, ctx)
+        let along = self.axis.unit().dot(pos);
+        let (first, last) = match self.ordered {
+            true => (
+                self.ends.partition_point(|&far| far <= along),
+                self.starts.partition_point(|&start| start <= along),
+            ),
+            false => (0, self.bands.len()),
+        };
+        (first..last).rev().find_map(|index| {
+            let (layout, anchor) = &self.bands[index];
+            layout.get_block_with(pos - *anchor, ctx)
+        })
     }
 
     fn size_with(&self, _ctx: &Ctx) -> BlockPos {
@@ -313,7 +361,7 @@ pub struct EdgeArranged<L>(Reverse<Arranged<Reverse<L>>>);
 
 impl<L> EdgeArranged<L> {
     /// `align` is passed to both inner (per-sub-layout) and outer (whole) Reverse.
-    pub fn new<Ctx, I>(layouts: I, axis: Axis, gap: u32, align: Mask, ctx: &Ctx) -> Self
+    pub fn new<Ctx, I>(layouts: I, axis: Axis, gap: i32, align: Mask, ctx: &Ctx) -> Self
     where
         I: IntoIterator<Item = L>,
         L: Layout<Ctx>,
@@ -819,6 +867,148 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A solid cuboid drawing a block under a chosen name.
+    struct Named(BlockPos, &'static str);
+
+    impl Layout<()> for Named {
+        fn block_at_with(&self, pos: BlockPos, ctx: &()) -> Option<BlockState> {
+            self.contains_with(pos, ctx).then(|| BlockState {
+                name: self.1.into(),
+                properties: Default::default(),
+            })
+        }
+
+        fn size_with(&self, _ctx: &()) -> BlockPos {
+            self.0
+        }
+    }
+
+    fn arrange(sizes: &[(i32, i32, i32)], gap: i32) -> Arranged<Solid> {
+        let items = sizes.iter().map(|&(x, y, z)| Solid(BlockPos::new(x, y, z)));
+        Arranged::new(items, Axis::Easting, gap, &())
+    }
+
+    /// A negative gap overlaps adjacent items, and the later one wins.
+    #[test]
+    fn negative_gap_layers_later_items_on_top() {
+        let items = [
+            Named(BlockPos::new(5, 1, 1), "minecraft:stone"),
+            Named(BlockPos::new(5, 1, 1), "minecraft:dirt"),
+        ];
+        let arranged = Arranged::new(items, Axis::Easting, -2, &());
+        let name = |x| {
+            arranged
+                .get_block(BlockPos::new(x, 0, 0))
+                .map(|block| block.name)
+        };
+
+        assert_eq!(arranged.size(), BlockPos::new(8, 1, 1));
+        assert_eq!(name(2), Some("minecraft:stone".into()));
+        assert_eq!(name(3), Some("minecraft:dirt".into()));
+        assert_eq!(name(4), Some("minecraft:dirt".into()));
+        assert_eq!(name(7), Some("minecraft:dirt".into()));
+        assert_eq!(name(8), None);
+    }
+
+    /// A signed gap works on any arrangement axis, not just easting.
+    #[test]
+    fn signed_gap_arranges_vertically() {
+        let items = [Solid(BlockPos::new(1, 3, 1)), Solid(BlockPos::new(1, 2, 1))];
+        let arranged = Arranged::new(items, Axis::Elevation, -1, &());
+
+        assert_eq!(arranged.size(), BlockPos::new(1, 4, 1));
+        assert!(arranged.get_block(BlockPos::new(0, 0, 0)).is_some());
+        assert!(arranged.get_block(BlockPos::new(0, 2, 0)).is_some());
+        assert!(arranged.get_block(BlockPos::new(0, 3, 0)).is_some());
+        assert!(arranged.get_block(BlockPos::new(0, 4, 0)).is_none());
+    }
+
+    /// The southing axis mirrors easting on the z component.
+    #[test]
+    fn signed_gap_arranges_southwards() {
+        let items = [Solid(BlockPos::new(1, 1, 3)), Solid(BlockPos::new(1, 1, 2))];
+        let arranged = Arranged::new(items, Axis::Southing, -1, &());
+
+        assert_eq!(arranged.size(), BlockPos::new(1, 1, 4));
+        assert!(arranged.get_block(BlockPos::new(0, 0, 0)).is_some());
+        assert!(arranged.get_block(BlockPos::new(0, 0, 2)).is_some());
+        assert!(arranged.get_block(BlockPos::new(0, 0, 3)).is_some());
+        assert!(arranged.get_block(BlockPos::new(0, 0, 4)).is_none());
+    }
+
+    /// A gap more negative than the item extent reverses the anchors, and the
+    /// bounding box still starts at the origin.
+    #[test]
+    fn reversed_gap_shifts_back_to_the_origin() {
+        let arranged = arrange(&[(1, 1, 1); 2], -5);
+
+        assert_eq!(arranged.size(), BlockPos::new(5, 1, 1));
+        assert!(arranged.get_block(BlockPos::new(0, 0, 0)).is_some());
+        assert!(arranged.get_block(BlockPos::new(1, 0, 0)).is_none());
+        assert!(arranged.get_block(BlockPos::new(4, 0, 0)).is_some());
+    }
+
+    /// Every covered cell of a signed gap matches a naive placement over the
+    /// whole bounding box, including overlaps and reversed anchors.
+    #[test]
+    fn signed_gap_matches_naive_placement() {
+        const CASES: [(&[(i32, i32, i32)], i32); 6] = [
+            (&[(5, 1, 1); 4], 2),
+            (&[(5, 1, 1); 4], -2),
+            (&[(1, 1, 1); 3], -5),
+            (&[(6, 2, 4), (1, 5, 2), (3, 1, 1)], -4),
+            (&[(2, 2, 2); 3], 0),
+            (&[(4, 1, 1), (1, 4, 1), (2, 3, 2)], -1),
+        ];
+        for &(sizes, gap) in &CASES {
+            let arranged = arrange(sizes, gap);
+
+            let mut anchors = Vec::new();
+            let mut cursor = 0;
+            for &(x, _, _) in sizes {
+                anchors.push(cursor);
+                cursor += x + gap;
+            }
+            let first = anchors.iter().copied().min().unwrap_or(0);
+            let last = sizes
+                .iter()
+                .zip(&anchors)
+                .map(|(&(x, _, _), &anchor)| anchor - first + x)
+                .max()
+                .unwrap_or(0);
+            assert_eq!(arranged.size().x, last, "{sizes:?} at {gap}");
+
+            let size = arranged.size();
+            for z in 0..size.z {
+                for y in 0..size.y {
+                    for x in 0..size.x {
+                        let pos = BlockPos::new(x, y, z);
+                        let hit = sizes.iter().enumerate().any(|(i, &(sx, sy, sz))| {
+                            let start = anchors[i] - first;
+                            (start..start + sx).contains(&x)
+                                && (0..sy).contains(&y)
+                                && (0..sz).contains(&z)
+                        });
+                        assert_eq!(
+                            arranged.get_block(pos).is_some(),
+                            hit,
+                            "{pos:?} in {sizes:?} at {gap}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// An empty arrangement covers nothing and has zero size.
+    #[test]
+    fn empty_arrangement_has_no_size() {
+        let arranged = Arranged::<Solid>::new([], Axis::Easting, -3, &());
+
+        assert_eq!(arranged.size(), BlockPos::ORIGIN);
+        assert!(arranged.get_block(BlockPos::ORIGIN).is_none());
     }
 
     /// The window always reaches the highest covering item, so no scan can start
